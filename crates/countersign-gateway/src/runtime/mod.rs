@@ -696,11 +696,16 @@ impl Connection {
         .await??;
         drop(permit);
         tokio::select! {
-            result=self.refresh_peer(&peer_chain, &guards)=>result,
+            result=self.refresh_peer(&peer_chain, &guards, evidence_deadline)=>result,
             result=admit_streams(control, &guards, requests, evidence_deadline, || self.observe(ObservationKind::MtlsAccepted))=>result,
         }
     }
-    async fn refresh_peer(&self, chain: &[String], guards: &[Guard; 2]) -> Result<()> {
+    async fn refresh_peer(
+        &self,
+        chain: &[String],
+        guards: &[Guard; 2],
+        mut deadline: Instant,
+    ) -> Result<()> {
         let rule = self
             .gateway
             .config
@@ -709,7 +714,10 @@ impl Connection {
             .find(|r| r.id == self.response.activation.grant.scope.entry_id())
             .ok_or_else(|| invalid("missing destination rule"))?;
         loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep_until(deadline.min(Instant::now() + Duration::from_secs(10))).await;
+            if Instant::now() >= deadline {
+                return Err(invalid("upstream evidence expired"));
+            }
             guards[0].check()?;
             guards[1].check()?;
             let trust = PeerTrust::load(rule)?;
@@ -719,6 +727,10 @@ impl Connection {
             for guard in guards {
                 guard.cap(cap)?;
             }
+            // An imported replacement may expire before the next refresh. Wake
+            // even on idle sockets and preserve the earliest accepted deadline.
+            let now = Instant::now();
+            deadline = deadline.min(now + Duration::from_millis(cap.saturating_sub(utc_ms()?)));
         }
     }
 }

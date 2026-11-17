@@ -53,6 +53,19 @@ def identity(directory, name, issuer=None, hosts=()):
     return key, cert
 
 
+def publish_crl(path, ca, serial, deadline):
+    key, issuer = ca
+    now = datetime.datetime.now(datetime.timezone.utc)
+    crl = (x509.CertificateRevocationListBuilder().issuer_name(issuer.subject)
+           .last_update(now - datetime.timedelta(seconds=1)).next_update(deadline)
+           .add_extension(x509.CRLNumber(serial), False)
+           .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), False)
+           .sign(key, hashes.SHA256()))
+    temporary = path.with_suffix('.tmp')
+    temporary.write_bytes(crl.public_bytes(serialization.Encoding.DER))
+    temporary.replace(path)
+
+
 def b64(data):
     return base64.b64encode(data).decode('ascii')
 
@@ -82,7 +95,7 @@ class Site(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'x')
             self.server.slow_started.set()
-            self.connection.settimeout(6)
+            self.connection.settimeout(25)
             try:
                 if not self.connection.recv(1):
                     self.server.cutoff.set()
@@ -165,7 +178,7 @@ def server(addr, handler, tls):
         thread.join()
 
 
-def do_test(dir, binary, ip,site, broker, identities, shared):
+def do_test(dir, binary, ip,site, broker, identities, ca, shared):
     host = f'site.test:{site.server_port}'
     broker.host = host
     broker.accounts = {}
@@ -198,6 +211,9 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
               'clock_uncertainty_ms':100,
               'destinations':[{'id':'site','version':1,'pattern':host,'roots':str(dir/'ca.pem'),'private_networks':[ip+'/32']}]}
     if shared:
+        crl = dir / 'site.crl'
+        publish_crl(crl, ca, 1, datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))
+        config['destinations'][0]['revocation'] = {'kind':'crl', 'files':[str(crl)]}
         config['shared']={'listener_cert':str(dir/'listener.pem'),'listener_key':str(dir/'listener.key'),
                           'gateway_token':str(dir/'service'),
                           'ca':{'type':'local','cert':str(dir/'ca.pem'),'key':str(dir/'ca.key')}}
@@ -223,12 +239,12 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
                     threading.Event().wait(.05)
             else:
                 raise RuntimeError('Gateway did not start')
-            def request(user,extra=(),path='/'):
-                args=['curl','--silent','--show-error','--fail','--max-time','8','--noproxy','','--proxy',proxy,
+            def request(user,extra=(),path='/', timeout=8):
+                args=['curl','--silent','--show-error','--fail','--max-time',str(timeout),'--noproxy','','--proxy',proxy,
                       '--proxy-cacert',str(dir/'ca.pem'),'--cacert',str(pub)]
                 if shared:
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
-                return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=10)
+                return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=timeout+2)
             users = list(identities) if shared else ['alice']
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(users)) as pool:
                 results = list(pool.map(request,users))
@@ -281,6 +297,20 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
                     broker.retired['bob'].set()
                     assert future.result(timeout=4).returncode != 0
                     assert site.cutoff.wait(1)
+                # Revalidation at 10s imports a new, shorter evidence deadline.
+                # The idle transport must close at that deadline ahead of the
+                # next periodic check and its still-current 30-second leases.
+                site.cutoff = threading.Event()
+                site.slow_started = threading.Event()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(request,'alice-other-context',(),'/slow',24)
+                    assert site.slow_started.wait(4)
+                    deadline = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0) + datetime.timedelta(seconds=14)
+                    publish_crl(crl, ca, 2, deadline)
+                    assert site.cutoff.wait(deadline.timestamp() - time.time() + 2), 'Idle upstream survived shortened CRL validity'
+                    assert time.time() >= deadline.timestamp() - 1, 'Idle upstream closed before shortened validity'
+                    result = future.result(timeout=1)
+                    assert result.returncode not in (0, 28), (result.returncode, result.stderr)
         finally:
             child.terminate()
             child.wait(timeout=6)
@@ -309,7 +339,7 @@ def main():
             ip=s.getsockname()[0]
         with server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker:
             for shared in (False,True):
-                do_test(dir,binary,ip,site,broker,identities,shared)
+                do_test(dir,binary,ip,site,broker,identities,ca,shared)
                 print(('shared' if shared else 'sidecar')+' Gateway mTLS passed')
 
 
