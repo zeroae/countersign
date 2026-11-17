@@ -4,11 +4,14 @@ const crypto=require('node:crypto');
 const readline=require('node:readline');
 if (process.env.COUNTERSIGN_CI_NO_UI) require(process.env.COUNTERSIGN_CI_NO_UI).denyInteraction();
 const addon=require(process.env.COUNTERSIGN_CI_ADDON);
-const wanted=new Set(JSON.parse(process.env.COUNTERSIGN_CI_FINGERPRINTS));
+const fingerprints=JSON.parse(process.env.COUNTERSIGN_CI_FINGERPRINTS);
+const sameName=new Set(fingerprints.slice(0,3));
+const scheme=process.env.COUNTERSIGN_CI_SCHEME;
 const hex=cert=>Buffer.from(cert.certSha256,'base64').toString('hex');
 async function main(){
   console.error('Discovering installed native identities');
-  const available=(await addon.listIdentities()).filter(c=>wanted.has(hex(c)));
+  const all=await addon.listIdentities();
+  const available=all.filter(c=>sameName.has(hex(c)));
   assert.equal(available.length,3,'all three installed identities must be available');
   assert.equal(new Set(available.map(c=>c.subject)).size,1);
   const two=available.slice(0,2).map(c=>c.certSha256);
@@ -19,7 +22,10 @@ async function main(){
   assert.equal((await addon.listIdentities(JSON.stringify({...hints,issuer_names:['MAMCAQE=']}))).length,0);
   assert.equal((await addon.listIdentities(JSON.stringify({...hints,signature_schemes:['rsa_pss_sha256']}))).length,0);
   assert.equal((await addon.listIdentities(JSON.stringify({cert_fingerprints:[]}))).length,0);
-  const selected=process.env.COUNTERSIGN_CI_PICKER_COUNT==='2'?filtered.at(-1):available.at(-1);
+  const family=scheme.startsWith('rsa')?'rsa':scheme.includes('384')?'p384':'p256';
+  const p256=process.env.COUNTERSIGN_CI_PICKER_COUNT==='2'?filtered.at(-1):available.at(-1);
+  const selected=family==='p256'?p256:all.find(c=>hex(c)===fingerprints[family==='rsa'?4:3]);
+  assert.ok(selected,'installed '+family+' key is eligible');
   const host='mtls.example:443';
   const grant={
     workload:{integrator:'ci',user:'user',context:'context',workload:'test',workload_generation:1},
@@ -33,10 +39,10 @@ async function main(){
   for await (const line of readline.createInterface({input:process.stdin})){
     const {data,tls}=JSON.parse(line);
     const binding={grant,host,tls_connection:'conn',operation:crypto.randomUUID()};
-    const request={binding,tls,scheme:'ecdsa_nistp256_sha256',certificate_verify:data,deadline_ms:Date.now()+30_000};
+    const request={binding,tls,scheme,certificate_verify:data,deadline_ms:Date.now()+30_000};
     const wrongHost={...request,binding:{...binding,host:'other.example:443'}};
     await assert.rejects(addon.signTls(JSON.stringify(wrongHost)));
-    console.error('Requesting native '+tls+' CertificateVerify');
+    console.error('Requesting native '+tls+' '+scheme+' CertificateVerify');
     const changed=Buffer.from(data,'base64');
     if (tls==='tls12') {
       const index=changed.indexOf(Buffer.from('mtls.example'));
