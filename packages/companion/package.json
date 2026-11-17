@@ -1,0 +1,23 @@
+{
+  "name": "@countersign/companion",
+  "version": "0.1.0",
+  "description": "Approve TLS client certificate use from your desktop",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "lint": "eslint src test",
+    "test": "node --test",
+    "package": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  },
+  "author": "Countersign contributors",
+  "homepage": "https://github.com/zeroae/countersign"
+}

@@ -1,0 +1,56 @@
+name: Native provider qualification
+on:
+  push:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')) && '["ubuntu-24.04","ubuntu-24.04-arm","windows-2025","windows-11-arm","macos-26","macos-15-intel"]' || '["ubuntu-24.04","ubuntu-24.04-arm","windows-2025","windows-11-arm"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Linux providers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3-dev softhsm2 libsecret-tools gnome-keyring dbus-daemon
+          python -m pip install python-pkcs11==0.10.1 asn1crypto==1.5.1
+      - run: python -m pip install cryptography==50.0.2
+      - name: Build production addon
+        run: cargo build --release --locked -p countersign-native
+      - name: Stage native prebuild
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, shutil
+          base=Path("target/release")
+          files={"Windows":"countersign_native.dll","Linux":"libcountersign_native.so","macOS":"libcountersign_native.dylib"}
+          root=Path("prebuild")
+          root.mkdir()
+          shutil.copy(base/files[os.environ["RUNNER_OS"]],root/"countersign.node")
+      - name: Check protected storage after service restart and lock
+        if: runner.os == 'Linux'
+        run: python crates/countersign-native/tests/linux-keyring.py prebuild/countersign.node
+      - name: Verify product addon and real TLS client signatures
+        run: python crates/countersign-native/tests/native_ci.py prebuild/countersign.node
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}-${{ runner.arch }}
+          path: prebuild/countersign.node
+          if-no-files-found: error

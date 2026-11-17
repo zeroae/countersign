@@ -1,0 +1,7 @@
+/target/
+node_modules/
+dist/
+*.node
+__pycache__/
+*.pyc
+/recipe/rendered_recipe.yaml

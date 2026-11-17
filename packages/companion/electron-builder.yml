@@ -1,0 +1,35 @@
+appId: io.zeroae.countersign
+productName: Countersign
+artifactName: countersign-companion-${version}-${os}-${arch}.${ext}
+asar: true
+asarUnpack:
+  - native/*.node
+files:
+  - src/**
+  - native/countersign-native.node
+  - assets/**
+  - package.json
+directories:
+  buildResources: assets
+protocols:
+  - name: Countersign approval
+    schemes:
+      - countersign
+linux:
+  category: Utility
+  maintainer: Countersign contributors <maintainers@users.noreply.github.com>
+  executableName: countersign-companion
+  icon: assets/icon.png
+  target:
+    - AppImage
+    - deb
+mac:
+  category: public.app-category.utilities
+  icon: assets/icon.png
+  target: dmg
+win:
+  icon: assets/icon.png
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false

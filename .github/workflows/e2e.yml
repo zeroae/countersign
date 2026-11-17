@@ -1,0 +1,33 @@
+name: Sidecar mTLS
+on: [push, pull_request]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+jobs:
+  curl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap gnome-keyring libsecret-tools libnss3-dev libnss-wrapper softhsm2 xvfb xauth libgtk-3-0t64
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pip install -r examples/demo-integrator/test/fixture-requirements.txt
+      - run: cargo build --locked --workspace
+      - run: node scripts/native-package.mjs debug
+      - run: pnpm --filter @countersign/companion exec electron-builder --dir --publish never
+      - name: Choose the last identity and compare it to the upstream TLS peer
+        run: |
+          for count in 2 3; do
+            timeout 180 dbus-run-session -- xvfb-run -a python examples/demo-integrator/test/e2e.py --app packages/companion/dist/linux-unpacked/countersign-companion --count "$count"
+          done

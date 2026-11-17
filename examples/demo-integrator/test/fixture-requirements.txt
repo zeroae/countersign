@@ -1,0 +1,4 @@
+asn1crypto==1.5.1
+cryptography==50.0.2
+python-pkcs11==0.10.1
+playwright==1.65.2
