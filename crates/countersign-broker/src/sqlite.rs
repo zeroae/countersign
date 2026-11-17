@@ -13,8 +13,29 @@ impl SqliteApprovalStore {
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", true)?;
+        connection.pragma_update(None, "secure_delete", true)?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > 1 {
+            return Err(StoreError::InvalidInput);
+        }
         tx.execute_batch(include_str!("schema.sql"))?;
+        if version == 0 {
+            // Earlier preview databases stored socket evidence without
+            // sequence numbers. Preserve the historical record but fence
+            // these enforcers before accepting any renewal.
+            let has_sequence:bool=tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('enforcer_issue') WHERE name='sequence')",
+                [], |r|r.get(0),
+            )?;
+            if !has_sequence {
+                tx.execute_batch("ALTER TABLE enforcer_issue ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+                     ALTER TABLE enforcer_issue ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0;
+                     ALTER TABLE enforcer_issue ADD COLUMN closed INTEGER NOT NULL DEFAULT 0 CHECK(closed IN (0,1));
+                     UPDATE enforcer_issue SET closed=1,expires_at_ms=0;")?;
+            }
+            tx.pragma_update(None, "user_version", 1)?;
+        }
         tx.commit()?;
         Ok(Self { connection })
     }
@@ -570,6 +591,107 @@ impl ApprovalStore for SqliteApprovalStore {
         }
         tx.commit()?;
         Ok(affected)
+    }
+
+    fn permit(&self, workload: &Workload, entry: Option<&str>) -> Result<()> {
+        let generation =
+            i64::try_from(workload.generation).map_err(|_| StoreError::InvalidInput)?;
+        let ok:bool=self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workload_binding WHERE integrator=?1 AND owner=?2 AND context=?3
+             AND instance=?4 AND generation=?5 AND retired=0
+             AND NOT EXISTS(SELECT 1 FROM emergency_stop WHERE integrator=?1)
+             AND NOT EXISTS(SELECT 1 FROM issuer_stop WHERE integrator=?1)
+             AND NOT EXISTS(SELECT 1 FROM suspended_user WHERE integrator=?1 AND owner=?2)
+             AND NOT EXISTS(SELECT 1 FROM closed_context WHERE integrator=?1 AND owner=?2 AND context=?3)
+             AND NOT EXISTS(SELECT 1 FROM denied_destination WHERE integrator=?1 AND owner=?2 AND entry_id=?6))",
+            params![workload.owner.integrator,workload.owner.user,workload.context,workload.instance,generation,entry],
+            |r|r.get(0),
+        )?;
+        if ok {
+            Ok(())
+        } else {
+            Err(StoreError::Unavailable)
+        }
+    }
+
+    fn issue_lease(
+        &mut self,
+        req: &countersign_protocol::wire::LeaseRequest,
+        boot: Uuid,
+        current_device: &countersign_protocol::wire::DeviceBinding,
+        at_ms: u64,
+        until_ms: u64,
+    ) -> Result<()> {
+        use countersign_protocol::wire::Enforcer;
+        let role = match req.enforcer {
+            Enforcer::Ingress => "ingress",
+            Enforcer::Egress => "egress",
+            _ => return Err(StoreError::InvalidInput),
+        };
+        if until_ms <= at_ms || until_ms - at_ms > 30_000 {
+            return Err(StoreError::InvalidInput);
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let gid = req.grant.grant.as_str();
+        let generation =
+            i64::try_from(req.generation.get()).map_err(|_| StoreError::InvalidInput)?;
+        let sequence = i64::try_from(req.sequence.get()).map_err(|_| StoreError::InvalidInput)?;
+        let at = i64::try_from(at_ms).map_err(|_| StoreError::InvalidInput)?;
+        let until = i64::try_from(until_ms).map_err(|_| StoreError::InvalidInput)?;
+        let saved: String = tx
+            .query_row(
+                "SELECT activation FROM working_identity WHERE grant_id=?1",
+                [gid],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or(StoreError::Unavailable)?;
+        let mut original: countersign_protocol::wire::Activate =
+            serde_json::from_str(&saved).map_err(|_| StoreError::Unavailable)?;
+        if current_device.pairing != original.grant.device.pairing
+            || current_device.key != original.grant.device.key
+            || req.grant.device.channel_generation < original.grant.device.channel_generation
+            || req.grant.device.channel_generation > current_device.channel_generation
+        {
+            return Err(StoreError::Unavailable);
+        }
+        original.grant.device.channel_generation = req.grant.device.channel_generation;
+        if original.grant != req.grant {
+            return Err(StoreError::Unavailable);
+        }
+        if req.grant.device != *current_device {
+            let issued:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM enforcer_issue WHERE grant_id=?1 AND enforcer=?2 AND instance=?3)",
+                params![gid,role,req.instance.as_str()],|r|r.get(0))?;
+            if !issued {
+                return Err(StoreError::Unavailable);
+            }
+        }
+        let others: i64 = tx.query_row(
+            "SELECT count(*) FROM enforcer_issue WHERE grant_id=?1
+            AND NOT (enforcer=?2 AND instance=?3) AND expires_at_ms>?4 AND closed=0",
+            params![gid, role, req.instance.as_str(), at],
+            |r| r.get(0),
+        )?;
+        if others >= 64 {
+            return Err(StoreError::Capacity);
+        }
+        let encoded = serde_json::to_string(&req.grant).map_err(|_| StoreError::InvalidInput)?;
+        let changed=tx.execute("INSERT INTO enforcer_issue(grant_id,enforcer,instance,gateway_boot,grant_binding,expires_at_ms,generation,sequence)
+            SELECT ?1,?2,?3,?4,?5,?6,?7,?8 WHERE EXISTS(
+                SELECT 1 FROM working_identity w JOIN approval a ON a.id=w.approval JOIN approved_grant g ON g.id=w.grant_id
+                WHERE w.grant_id=?1 AND a.state='approved' AND a.current=1 AND g.expires_at*1000>=?6)
+            ON CONFLICT(grant_id,enforcer,instance) DO UPDATE SET expires_at_ms=excluded.expires_at_ms, sequence=excluded.sequence
+            WHERE enforcer_issue.gateway_boot=excluded.gateway_boot AND enforcer_issue.grant_binding=excluded.grant_binding
+              AND enforcer_issue.generation=excluded.generation AND enforcer_issue.sequence<excluded.sequence
+              AND enforcer_issue.closed=0 AND enforcer_issue.expires_at_ms>?9",
+            params![gid,role,req.instance.as_str(),boot.to_string(),encoded,until,generation,sequence,at])?;
+        if changed != 1 {
+            return Err(StoreError::Unavailable);
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn bind_activation(

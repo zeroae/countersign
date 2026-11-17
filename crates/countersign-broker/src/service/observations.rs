@@ -1,22 +1,5 @@
 use super::*;
 
-pub(super) fn issued(
-    db: &rusqlite::Connection,
-    req: &w::LeaseRequest,
-    role: &str,
-    boot: Uuid,
-    until: u64,
-) -> Result<()> {
-    db.execute(
-        "INSERT INTO enforcer_issue(grant_id,enforcer,instance,gateway_boot,grant_binding,expires_at_ms)
-         VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(grant_id,enforcer,instance)
-         DO UPDATE SET expires_at_ms=excluded.expires_at_ms WHERE gateway_boot=excluded.gateway_boot",
-        params![req.grant.grant.as_str(),role,req.instance.as_str(),boot.to_string(),
-            serde_json::to_string(&req.grant).map_err(|_|Fault::Storage)?,until as i64],
-    )?;
-    Ok(())
-}
-
 pub(super) fn observe(
     authority: &mut Authority,
     binding: &w::WorkloadBinding,
@@ -58,6 +41,16 @@ pub(super) fn observe(
     }
     tx.execute("INSERT OR IGNORE INTO gateway_observation(grant_id,enforcer,instance,observation,host,tls_connection,received_at_ms)
         VALUES(?1,?2,?3,?4,?5,?6,?7)",params![event.grant.grant.as_str(),role,event.enforcer_instance.as_str(),kind,host,event.tls_connection.as_str(),at as i64])?;
+    if event.observation != w::ObservationKind::MtlsAccepted {
+        tx.execute(
+            "UPDATE enforcer_issue SET closed=1 WHERE grant_id=?1 AND enforcer=?2 AND instance=?3",
+            params![
+                event.grant.grant.as_str(),
+                role,
+                event.enforcer_instance.as_str()
+            ],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }

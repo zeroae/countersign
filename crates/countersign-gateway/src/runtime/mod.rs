@@ -146,11 +146,18 @@ impl Gateway {
         }
         let connection = slot.connections.clone().try_acquire_owned()?;
         let handshake = slot.handshakes.clone().try_acquire_owned()?;
-        let [down, up, control] = slot
+        let child = slot
             .process
             .as_mut()
-            .ok_or_else(|| invalid("worker fenced"))?
-            .attach()?;
+            .ok_or_else(|| invalid("worker fenced"))?;
+        let [down, up, control] = match child.attach() {
+            Ok(streams) => streams,
+            Err(error) => {
+                slot.fence.send_replace(true);
+                slot.process.take();
+                return Err(error);
+            }
+        };
         Ok(Assignment {
             fence: slot.fence.subscribe(),
             down,
@@ -184,9 +191,19 @@ impl Gateway {
                 return;
             }
             let deadline = Instant::now() + Duration::from_millis(remain.min(25_000));
-            let reply = tokio::select! {
-                _ = closed.changed() => return,
-                result = self.broker.call("watch",&credential,GatewayToBroker::Watch(grant.clone()),deadline) => result,
+            let notification = self.broker.call(
+                "watch",
+                &credential,
+                GatewayToBroker::Watch(grant.clone()),
+                deadline,
+            );
+            let reply = {
+                let retired = closed.changed();
+                tokio::pin!(retired, notification);
+                match futures_util::future::select(retired, notification).await {
+                    futures_util::future::Either::Left(_) => return,
+                    futures_util::future::Either::Right((reply, _)) => reply,
+                }
             };
             if matches!(reply,Ok(BrokerToGateway::Retire(ref retired)) if retired == &grant) {
                 self.fence(&grant);
@@ -200,9 +217,11 @@ impl Gateway {
             } else {
                 4
             };
-            tokio::select! {
-                _ = closed.changed() => return,
-                _ = tokio::time::sleep(Duration::from_secs(delay)) => {},
+            if tokio::time::timeout(Duration::from_secs(delay), closed.changed())
+                .await
+                .is_ok()
+            {
+                return;
             }
         }
     }
@@ -667,6 +686,7 @@ impl Connection {
             let CommandMessage::Ready = worker::receive(&mut control).await? else {
                 return Err(invalid("expected upstream confirmation"));
             };
+            self.check(&guards)?;
             worker::send(&mut control, &Reply::Proceed).await?;
             Ok((
                 Instant::now() + Duration::from_millis(cap.saturating_sub(utc_ms()?)),
@@ -815,6 +835,7 @@ pub async fn run(args: &[String]) -> Result<()> {
     if verb != "serve" {
         return Err(invalid("unrecognized Gateway command"));
     }
+    ChildHandle::verify_environment().await?;
     let policy = config.policy()?;
     let broker = Broker::new(&config)?;
     let (issuer, tls) = if let Some(shared) = &config.shared {
@@ -878,5 +899,70 @@ pub async fn run(args: &[String]) -> Result<()> {
                 proxy(stream, gateway).await;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn request(control: &mut UnixStream, id: u64) -> bool {
+        worker::send(control, &CommandMessage::OpenStream(id))
+            .await
+            .unwrap();
+        match worker::receive::<Reply>(control).await.unwrap() {
+            Reply::StreamGranted(granted) => granted,
+            _ => panic!("unexpected stream reply"),
+        }
+    }
+
+    #[tokio::test]
+    async fn simultaneous_connections_share_user_and_grant_stream_limits() {
+        fn connection(grant: Arc<Semaphore>, user: Arc<Semaphore>) -> UnixStream {
+            let (client, server) = UnixStream::pair().unwrap();
+            let now = utc_ms().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let guards = std::array::from_fn(|_| {
+                Guard::new(
+                    broker::Lease::from_reply(
+                        Instant::now(),
+                        now,
+                        30_000u32.try_into().unwrap(),
+                        now + 30_000,
+                        100,
+                    )
+                    .unwrap(),
+                )
+            });
+            tokio::spawn(async move {
+                let _ = admit_streams(server, &guards, [grant, user], deadline, || {}).await;
+            });
+            client
+        }
+        let user = Arc::new(Semaphore::new(2));
+        let grant = Arc::new(Semaphore::new(1));
+        let mut a = connection(grant.clone(), user.clone());
+        let mut b = connection(grant, user.clone());
+        let mut c = connection(Arc::new(Semaphore::new(2)), user);
+        let mut other = connection(Arc::new(Semaphore::new(1)), Arc::new(Semaphore::new(1)));
+        assert!(request(&mut a, 1).await);
+        assert!(!request(&mut b, 1).await); // same grant, another HTTP connection
+        assert!(request(&mut c, 1).await);
+        assert!(!request(&mut c, 2).await); // new grant, shared user quota
+        assert!(request(&mut other, 1).await);
+        worker::send(&mut a, &CommandMessage::CloseStream(1))
+            .await
+            .unwrap();
+        // Await a new decision on a's ordered IPC channel, establishing the
+        // release was processed before checking c's view of shared quota.
+        assert!(request(&mut a, 2).await);
+        worker::send(&mut a, &CommandMessage::CloseStream(2))
+            .await
+            .unwrap();
+        worker::send(&mut a, &CommandMessage::Csr(String::new()))
+            .await
+            .unwrap();
+        assert!(worker::receive::<Reply>(&mut a).await.is_err());
+        assert!(request(&mut c, 3).await);
     }
 }

@@ -169,6 +169,21 @@ pub trait ApprovalStore {
         id: Uuid,
     ) -> Result<Vec<Uuid>>;
 
+    /// Authenticate current membership and optional destination permission for
+    /// a previously verified Workload credential.
+    fn permit(&self, workload: &Workload, entry: Option<&str>) -> Result<()>;
+
+    /// Consume the next monotonic renewal of a live enforcer. The caller has
+    /// capped the deadline by the token, grant and verified certificate status.
+    fn issue_lease(
+        &mut self,
+        request: &countersign_protocol::wire::LeaseRequest,
+        gateway_boot: Uuid,
+        current_device: &countersign_protocol::wire::DeviceBinding,
+        at_ms: u64,
+        until_ms: u64,
+    ) -> Result<()>;
+
     /// Bind the worker and validated public identity exactly once. The
     /// reference store erases its working copy when the grant ends.
     fn bind_activation(

@@ -19,7 +19,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y bubblewrap gnome-keyring libsecret-tools libnss3-dev libnss-wrapper softhsm2 xvfb xauth libgtk-3-0t64
+      - run: sudo apt-get update && sudo apt-get install -y apparmor-profiles bubblewrap gnome-keyring libsecret-tools libnss3-dev libnss-wrapper softhsm2 xvfb xauth libgtk-3-0t64
+      - name: Enable the distribution's bubblewrap profile when the host restricts user namespaces
+        run: |
+          if ! bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true; then
+            sudo apparmor_parser --replace /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+            bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true
+          fi
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
       - run: pip install -r examples/demo-integrator/test/fixture-requirements.txt

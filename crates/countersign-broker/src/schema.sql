@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS enforcer_issue (
     grant_id TEXT NOT NULL REFERENCES approved_grant(id) ON DELETE CASCADE,
     enforcer TEXT NOT NULL CHECK(enforcer IN ('ingress','egress')), instance TEXT NOT NULL,
     gateway_boot TEXT NOT NULL, grant_binding TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+    generation INTEGER NOT NULL, sequence INTEGER NOT NULL, closed INTEGER NOT NULL DEFAULT 0 CHECK(closed IN (0,1)),
     PRIMARY KEY(grant_id,enforcer,instance)
 ) STRICT;
 

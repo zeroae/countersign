@@ -413,8 +413,25 @@ async fn authenticated_consent_signing_reconnect_and_revocation() {
             "unavailable"
         );
     };
-    let (refused, _) = tokio::join!(pending_sign, withdraw);
+    let watch = h.post("gateway/watch", token, frame("watch", grant.clone()));
+    let (refused, _, retired) = tokio::join!(pending_sign, withdraw, watch);
+    assert_eq!(
+        retired
+            .error_for_status()
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap()["type"],
+        "retire"
+    );
     assert!(!refused.status().is_success());
+    let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM working_identity", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
     let n = json!({"id":offered["binding"]["approval"]});
     send(&mut second, frame("revoke_approval", n.clone())).await;
     assert_eq!(receive(&mut second, "revoke_recorded").await["body"], n);

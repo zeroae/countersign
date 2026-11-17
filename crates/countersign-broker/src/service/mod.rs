@@ -102,8 +102,7 @@ struct LiveGrant {
     activation: w::Activate,
     chain: w::PublicChain,
     acknowledged: bool,
-    lease_seq: HashMap<(String, String, u64), (u64, u64)>,
-    operations: HashMap<String, u64>,
+    operations: std::collections::HashSet<w::Id>,
 }
 struct SignWait {
     leased_until: tokio::time::Instant,
@@ -127,7 +126,7 @@ struct Authority {
     enrollments: HashMap<String, PendingPair>,
     peers: HashMap<String, Peer>,
     grants: HashMap<String, LiveGrant>,
-    waiting: HashMap<String, SignWait>,
+    waiting: HashMap<(w::Id, w::Id), SignWait>,
 }
 impl Service {
     pub fn open(config: &Config) -> std::result::Result<Self, Box<dyn Error>> {
@@ -261,6 +260,9 @@ fn workload(v: &Workload) -> Result<w::WorkloadBinding> {
         workload_generation: NonZeroU64::new(v.generation).ok_or(Fault::Invalid)?,
     })
 }
+fn operation_key(op: &w::Operation) -> (w::Id, w::Id) {
+    (op.grant.grant.clone(), op.operation.clone())
+}
 fn send(peer: &Peer, id: w::Id, message: w::BrokerToCompanion) -> Result<()> {
     peer.send
         .try_send(w::Frame {
@@ -271,32 +273,19 @@ fn send(peer: &Peer, id: w::Id, message: w::BrokerToCompanion) -> Result<()> {
 }
 impl Authority {
     fn live_workload(&self, b: &w::WorkloadBinding) -> Result<()> {
+        self.permit(b, None)
+    }
+    fn allow_destination(&self, b: &w::WorkloadBinding, entry: &str) -> Result<()> {
+        self.permit(b, Some(entry))
+    }
+    fn permit(&self, b: &w::WorkloadBinding, entry: Option<&str>) -> Result<()> {
         if b.integrator != self.integrator {
             return Err(Fault::Denied);
         }
-        let ok = self.store.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM workload_binding WHERE integrator=?1
-          AND owner=?2 AND context=?3 AND instance=?4 AND generation=?5 AND retired=0
-             AND NOT EXISTS(SELECT 1 FROM emergency_stop WHERE integrator=?1)
-             AND NOT EXISTS(SELECT 1 FROM issuer_stop WHERE integrator=?1)
-             AND NOT EXISTS(SELECT 1 FROM suspended_user WHERE integrator=?1 AND owner=?2)
-             AND NOT EXISTS(SELECT 1 FROM closed_context WHERE integrator=?1 AND owner=?2 AND context=?3))",
-            params![
-                b.integrator.as_str(),
-                b.user.as_str(),
-                b.context.as_str(),
-                b.workload.as_str(),
-                i64::try_from(b.workload_generation.get()).map_err(|_| Fault::Invalid)?
-            ],
-            |r| r.get::<_, bool>(0),
-        )?;
-        if ok { Ok(()) } else { Err(Fault::Denied) }
-    }
-    fn allow_destination(&self, b: &w::WorkloadBinding, entry: &str) -> Result<()> {
-        self.live_workload(b)?;
-        let denied=self.store.connection.query_row("SELECT EXISTS(SELECT 1 FROM denied_destination WHERE integrator=?1 AND owner=?2 AND entry_id=?3)",
-            params![b.integrator.as_str(),b.user.as_str(),entry],|r|r.get::<_,bool>(0))?;
-        if denied { Err(Fault::Denied) } else { Ok(()) }
+        self.store.permit(&binding(b), entry).map_err(|e| match e {
+            crate::StoreError::Unavailable => Fault::Denied,
+            other => other.into(),
+        })
     }
     fn notify_pending(&mut self, r: &crate::Approval) {
         if self

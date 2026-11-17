@@ -377,3 +377,75 @@ fn renewal_replaces_only_at_commit_and_rejection_preserves_existing_grant() {
         [2; 32]
     );
 }
+
+#[test]
+fn winning_pairing_withdraws_consent_and_pending_renewal_idempotently() {
+    let mut f = Fixture::new();
+    let req = f.request("a.example", Trigger::Traffic);
+    let winner = f.session("winner");
+    let other = f.session("other");
+    let offer = f.store.offer(&winner, req.id).unwrap();
+    f.store
+        .decide(&winner, offer.id, Uuid::new_v4(), &approve(1, 3600))
+        .unwrap();
+    let renewal = f
+        .store
+        .renew(&f.workload, &f.policy, req.id, NonZeroU32::MIN)
+        .unwrap();
+    let renewal_offer = f.store.offer(&other, renewal.id).unwrap();
+    assert!(
+        f.store
+            .revoke(&f.workload.owner, Some(&other), req.id)
+            .is_err()
+    );
+    let mut ids = f
+        .store
+        .revoke(&f.workload.owner, Some(&winner), req.id)
+        .unwrap();
+    ids.sort();
+    let mut expected = vec![req.id, renewal.id];
+    expected.sort();
+    assert_eq!(ids, expected);
+    assert!(
+        f.store
+            .revoke(&f.workload.owner, Some(&winner), req.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        f.store
+            .decide(&other, renewal_offer.id, Uuid::new_v4(), &approve(2, 1))
+            .unwrap(),
+        Disposition::AlreadyResolved
+    );
+    assert!(
+        f.store
+            .approved_grant(&f.workload, req.id)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn opening_preview_database_migrates_lease_fences_transactionally() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("preview.db");
+    let old = Connection::open(&path).unwrap();
+    old.execute_batch("CREATE TABLE enforcer_issue (
+      grant_id TEXT NOT NULL REFERENCES approved_grant(id) ON DELETE CASCADE,
+      enforcer TEXT NOT NULL, instance TEXT NOT NULL, gateway_boot TEXT NOT NULL,
+      grant_binding TEXT NOT NULL, expires_at_ms INTEGER NOT NULL, PRIMARY KEY(grant_id,enforcer,instance)
+    ) STRICT;").unwrap();
+    drop(old);
+    drop(SqliteApprovalStore::open(&path).unwrap());
+    let inspect = Connection::open(&path).unwrap();
+    assert_eq!(
+        inspect
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(inspect.query_row("SELECT count(*) FROM pragma_table_info('enforcer_issue') WHERE name IN ('closed','generation','sequence')",[],|r|r.get::<_,i64>(0)).unwrap(),3);
+    inspect.pragma_update(None, "user_version", 99).unwrap();
+    assert!(SqliteApprovalStore::open(&path).is_err());
+}

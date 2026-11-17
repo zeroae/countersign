@@ -192,7 +192,7 @@ pub(super) async fn revoke(
             user: req.user.as_str().into(),
         };
         let affected = a.store.revoke(&owner, None, uid(&req.id)?)?;
-        controls::withdraw(a, &owner, affected);
+        controls::withdraw(a, affected);
         Ok(StatusCode::NO_CONTENT)
     })
     .await

@@ -75,11 +75,8 @@ fn retire(
     }
     Ok(affected)
 }
-pub(super) fn withdraw(a: &mut Authority, owner: &Owner, affected: Vec<Uuid>) {
+pub(super) fn withdraw(a: &mut Authority, affected: Vec<Uuid>) {
     clear_live(a, &affected.iter().map(Uuid::to_string).collect::<Vec<_>>());
-    for id in affected {
-        a.notify(&owner.user, wire_id(id));
-    }
 }
 pub(super) fn clear_live(a: &mut Authority, affected: &[String]) {
     let ids: std::collections::HashSet<_> = affected.iter().map(String::as_str).collect();
@@ -98,6 +95,18 @@ pub(super) fn clear_live(a: &mut Authority, affected: &[String]) {
     });
     a.waiting
         .retain(|_, v| a.grants.contains_key(v.op.grant.grant.as_str()));
+    // Pending prompts have no live grant to retire. An opaque wake lets
+    // their authenticated fetch observe the same committed terminal state.
+    for id in affected {
+        if let Ok(user) = a.store.connection.query_row(
+            "SELECT owner FROM approval WHERE integrator=?1 AND id=?2",
+            params![a.integrator.as_str(), id],
+            |row| row.get::<_, String>(0),
+        ) && let Ok(id) = w::Id::new(id.clone())
+        {
+            a.notify(&user, id);
+        }
+    }
 }
 pub(super) fn retire_generation(
     tx: &rusqlite::Transaction<'_>,

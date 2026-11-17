@@ -408,7 +408,7 @@ fn handle(a: &mut Authority, device: &w::DeviceBinding, frame: w::Frame<C>) -> R
         C::RevokeApproval(n) => {
             let owner = p.session.owner.clone();
             let affected = a.store.revoke(&owner, Some(&p.session), uid(&n.id)?)?;
-            controls::withdraw(a, &owner, affected);
+            controls::withdraw(a, affected);
             Ok(Some(B::RevokeRecorded(n)))
         }
         C::Devices(_) => Ok(Some(B::Devices(super::controls::devices(a, device)?))),
@@ -475,7 +475,7 @@ fn handle(a: &mut Authority, device: &w::DeviceBinding, frame: w::Frame<C>) -> R
             }
             let op = a
                 .waiting
-                .get(done.binding.operation.as_str())
+                .get(&operation_key(&done.binding))
                 .ok_or(Fault::Unavailable)?;
             if op.op != done.binding
                 || op.deadline <= at
@@ -487,7 +487,7 @@ fn handle(a: &mut Authority, device: &w::DeviceBinding, frame: w::Frame<C>) -> R
             verify_signature(g.chain.as_slice()[0].as_slice(), op, &done)?;
             let op = a
                 .waiting
-                .remove(done.binding.operation.as_str())
+                .remove(&operation_key(&done.binding))
                 .ok_or(Fault::Unavailable)?;
             super::controls::signature_observed(a, &done.binding.grant)?;
             let _ = op.reply.send(done);
@@ -496,12 +496,12 @@ fn handle(a: &mut Authority, device: &w::DeviceBinding, frame: w::Frame<C>) -> R
         C::Cancel(target) => {
             let op = a
                 .waiting
-                .get(target.operation.as_str())
+                .get(&operation_key(&target))
                 .ok_or(Fault::Unavailable)?;
             if op.op != target || op.op.grant.device != *device {
                 return Err(Fault::Denied);
             }
-            a.waiting.remove(target.operation.as_str());
+            a.waiting.remove(&operation_key(&target));
             Ok(None)
         }
         _ => Err(Fault::Invalid),
@@ -625,8 +625,7 @@ fn decide(
                 activation: act.clone(),
                 chain,
                 acknowledged: false,
-                lease_seq: HashMap::new(),
-                operations: HashMap::new(),
+                operations: std::collections::HashSet::new(),
             },
         );
         Ok(Some(B::Activate(act)))

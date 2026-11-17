@@ -40,23 +40,35 @@ pub(super) async fn request(
                 .try_acquire_owned()
                 .map_err(|_| Fault::Busy)?;
             let scope = grant.clone();
-            let (mut signal, validity) = s
-                .apply(move |a| {
-                    let at = clock_ms()?;
-                    a.require_gateway(&scope, boot)?;
-                    let validity = a.validate_traffic(&scope, at)?.min(expires * 1000);
-                    let live = a
-                        .grants
-                        .get(scope.grant.as_str())
-                        .ok_or(Fault::Unavailable)?;
-                    Ok((live.retire_signal.subscribe(), validity))
-                })
-                .await?;
-            let wait = Duration::from_millis(validity.saturating_sub(clock_ms()?).min(20_000));
-            match tokio::time::timeout(wait, signal.changed()).await {
-                Ok(_) => w::BrokerToGateway::Retire(grant),
-                Err(_) if validity <= clock_ms()? => w::BrokerToGateway::Retire(grant),
-                Err(_) => w::BrokerToGateway::NoChange(grant),
+            let watcher = s.apply(move |a| {
+                let at = clock_ms()?;
+                if !a.grants.contains_key(scope.grant.as_str()) {
+                    // A revoke can win between delivery of the previous
+                    // heartbeat and reconnection of this long poll.
+                    let encoded=serde_json::to_string(&scope).map_err(|_|Fault::Invalid)?;
+                    let issued:bool=a.store.connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM enforcer_issue WHERE grant_id=?1 AND gateway_boot=?2 AND grant_binding=?3)",
+                        params![scope.grant.as_str(),boot.to_string(),encoded],|r|r.get(0)
+                    )?;
+                    if !issued { return Err(Fault::Unavailable); }
+                    return Ok(None);
+                }
+                a.require_gateway(&scope, boot)?;
+                let validity = a.validate_traffic(&scope, at)?.min(expires * 1000);
+                let live = a.grants.get(scope.grant.as_str()).ok_or(Fault::Unavailable)?;
+                Ok(Some((live.retire_signal.subscribe(), validity)))
+            }).await?;
+            let live = if let Some((mut signal, validity)) = watcher {
+                let wait = Duration::from_millis(validity.saturating_sub(clock_ms()?).min(20_000));
+                tokio::time::timeout(wait, signal.changed()).await.is_err()
+                    && validity > clock_ms()?
+            } else {
+                false
+            };
+            if live {
+                w::BrokerToGateway::NoChange(grant)
+            } else {
+                w::BrokerToGateway::Retire(grant)
             }
         }
         ("observe", w::GatewayToBroker::Observed(event)) => {
@@ -131,32 +143,19 @@ pub(super) async fn request(
                 let until = (at + 30_000).min(expires * 1000).min(limit);
                 let budget =
                     NonZeroU32::new(until.saturating_sub(at) as u32).ok_or(Fault::Expired)?;
-                let g = a
+                let current_device = &a
                     .grants
-                    .get_mut(req.grant.grant.as_str())
-                    .ok_or(Fault::Unavailable)?;
-                let enforcer = match req.enforcer {
-                    w::Enforcer::Ingress => "ingress",
-                    w::Enforcer::Egress => "egress",
-                    _ => return Err(Fault::Denied),
-                };
-                g.lease_seq.retain(|_, (_, end)| *end > at);
-                let key = (
-                    enforcer.to_owned(),
-                    req.instance.as_str().to_owned(),
-                    req.generation.get(),
-                );
-                if g.lease_seq
-                    .get(&key)
-                    .is_some_and(|(last, _)| *last >= req.sequence.get())
-                {
-                    return Err(Fault::Denied);
-                }
-                if !g.lease_seq.contains_key(&key) && g.lease_seq.len() >= 64 {
-                    return Err(Fault::Busy);
-                }
-                observations::issued(&a.store.connection, &req, enforcer, boot, until)?;
-                g.lease_seq.insert(key, (req.sequence.get(), until));
+                    .get(req.grant.grant.as_str())
+                    .ok_or(Fault::Unavailable)?
+                    .activation
+                    .grant
+                    .device;
+                a.store
+                    .issue_lease(&req, boot, current_device, at, until)
+                    .map_err(|e| match e {
+                        crate::StoreError::Unavailable => Fault::Denied,
+                        other => other.into(),
+                    })?;
                 Ok(w::BrokerToGateway::Lease(w::LeaseReply {
                     binding: req,
                     disposition: w::LeaseDisposition::Granted {
@@ -188,7 +187,7 @@ pub(super) async fn request(
                         return Err(Fault::Expired);
                     }
                     validate_input(&req)?;
-                    let op_id = req.binding.operation.as_str().to_owned();
+                    let key = operation_key(&req.binding);
                     let grant_id = req.binding.grant.grant.as_str();
                     let pairing = req.binding.grant.device.pairing.as_str();
                     let peer = a
@@ -213,7 +212,7 @@ pub(super) async fn request(
                     if g.operations.len() >= 65_536 {
                         return Err(Fault::Busy);
                     }
-                    if g.operations.contains_key(&op_id) || a.waiting.contains_key(&op_id) {
+                    if g.operations.contains(&req.binding.operation) {
                         return Err(Fault::Denied);
                     }
                     let (tx, rx) = oneshot::channel();
@@ -227,9 +226,9 @@ pub(super) async fn request(
                     let scheme = req.scheme;
                     let input = req.certificate_verify.clone();
                     send(peer, request_id.clone(), w::BrokerToCompanion::Sign(req))?;
-                    g.operations.insert(op_id.clone(), until);
+                    g.operations.insert(op.operation.clone());
                     a.waiting.insert(
-                        op_id,
+                        key,
                         SignWait {
                             leased_until,
                             scheme,
@@ -268,11 +267,11 @@ pub(super) async fn request(
                 }
                 a.live_workload(&binding)?;
                 a.require_gateway(&op.grant, boot)?;
-                if let Some(existing) = a.waiting.get(op.operation.as_str()) {
+                if let Some(existing) = a.waiting.get(&operation_key(&op)) {
                     if existing.op != op {
                         return Err(Fault::Denied);
                     }
-                    a.waiting.remove(op.operation.as_str());
+                    a.waiting.remove(&operation_key(&op));
                     if let Some(peer) = a.peers.get(op.grant.device.pairing.as_str()) {
                         let _ = send(peer, fresh(), w::BrokerToCompanion::Cancel(op.clone()));
                     }
@@ -375,7 +374,7 @@ async fn wait_for_signature(
                     .min(token_expires * 1000);
                 let pending = a
                     .waiting
-                    .get_mut(binding.operation.as_str())
+                    .get_mut(&operation_key(&binding))
                     .ok_or(Fault::Unavailable)?;
                 if pending.leased_until <= Instant::now() || pending.op != binding {
                     return Err(Fault::Expired);
@@ -410,10 +409,10 @@ impl Drop for CancelOnDrop {
             let _ = s
                 .apply(move |a| {
                     if a.waiting
-                        .get(op.operation.as_str())
+                        .get(&operation_key(&op))
                         .is_some_and(|p| p.op == op)
                     {
-                        a.waiting.remove(op.operation.as_str());
+                        a.waiting.remove(&operation_key(&op));
                         if let Some(peer) = a.peers.get(op.grant.device.pairing.as_str()) {
                             let _ = send(peer, fresh(), w::BrokerToCompanion::Cancel(op));
                         }

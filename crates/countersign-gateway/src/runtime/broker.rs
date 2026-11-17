@@ -117,10 +117,12 @@ impl Broker {
                 message,
             }
             .encode()?;
+            let bearer = credential.read().await?;
+            let url = format!("{}/v1/gateway/{path}", self.url);
             let mut request = self
                 .client
-                .post(format!("{}/v1/gateway/{path}", self.url))
-                .bearer_auth(credential.read().await?)
+                .post(url)
+                .bearer_auth(bearer)
                 .header("X-Countersign-Gateway-Instance", self.instance.to_string())
                 .header(reqwest::header::CONTENT_TYPE, "application/json");
             if let Some(secret) = &self.gateway_token {
@@ -233,7 +235,7 @@ pub struct Lease {
     uncertainty: u64,
 }
 impl Lease {
-    fn from_reply(
+    pub(super) fn from_reply(
         sent: Instant,
         wall: u64,
         budget: NonZeroU32,

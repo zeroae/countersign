@@ -66,6 +66,12 @@ def token(workload):
 class Fixture(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
+    def handle_error(self, request, client_address):
+        # Cancelling an outstanding poll or forcibly cutting off either TLS leg
+        # can reset the fixture socket while the HTTP library is reading it.
+        if not isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError)):
+            super().handle_error(request, client_address)
+
 
 class Site(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -173,7 +179,8 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
     (dir/'service').write_text(broker.service_secret)
     bindings = {}
     for user, (key, cert) in identities.items():
-        workload = {'integrator':'local','user':user,'context':user,'workload':user,'workload_generation':1}
+        principal = 'alice' if user == 'alice-other-context' else user
+        workload = {'integrator':'local','user':principal,'context':user,'workload':user,'workload_generation':1}
         der = cert.public_bytes(serialization.Encoding.DER)
         grant = {'workload':workload,'grant':user,'grant_version':1,'worker':user,'worker_generation':1,
                  'scope':{'entry_id':'site','entry_version':1,'pattern':host},
@@ -222,8 +229,8 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
                 if shared:
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
                 return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=10)
-            users = ['alice','bob'] if shared else ['alice']
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            users = list(identities) if shared else ['alice']
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(users)) as pool:
                 results = list(pool.map(request,users))
             for user,res in zip(users,results):
                 assert res.returncode==0,(user,res.stderr)
@@ -263,6 +270,7 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
             assert request('alice').returncode != 0, 'Lapsed worker reused old grant'
             if shared:
                 assert request('bob').returncode == 0, 'Alice cutoff affected Bob'
+                assert request('alice-other-context').returncode == 0, 'Cutoff crossed Contexts using the same identity'
                 # Bob's 30s authority remains valid on both legs. A retirement
                 # notification accelerates cutoff without waiting for renewal.
                 site.cutoff = threading.Event()
@@ -287,6 +295,7 @@ def main():
         for name,hosts in [('broker',['localhost']),('listener',['localhost']),('upstream',['site.test'])]:
             identity(dir,name,ca,hosts)
         identities={u: identity(dir,u,ca) for u in ('alice','bob')}
+        identities['alice-other-context'] = identities['alice']
         def tls(name):
             ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(dir/f'{name}.pem',dir/f'{name}.key')

@@ -127,7 +127,7 @@ pub struct ChildHandle {
     control: UnixDatagram,
 }
 impl ChildHandle {
-    pub fn launch() -> Result<Self> {
+    fn start(stderr: Stdio) -> Result<Self> {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
         let child = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
@@ -135,10 +135,39 @@ impl ChildHandle {
             .arg("grant-worker")
             .stdin(Stdio::from(OwnedFd::from(child_control)))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(stderr)
             .spawn()?;
         Ok(Self { child, control })
     }
+
+    pub fn launch() -> Result<Self> {
+        Self::start(Stdio::null())
+    }
+
+    /// Check the actual host sandbox, executable and control socket at startup.
+    /// This short-lived worker receives no grant, credentials or traffic.
+    pub async fn verify_environment() -> Result<()> {
+        let probe = Self::start(Stdio::piped())?;
+        probe.control.send(&[0])?;
+        let output =
+            tokio::time::timeout(Duration::from_secs(5), probe.child.wait_with_output()).await??;
+        if !output.status.success() {
+            let hint: String = String::from_utf8_lossy(&output.stderr)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(512)
+                .collect();
+            return Err(std::io::Error::other(format!(
+                "Gateway worker sandbox failed to start ({}): {hint}",
+                output.status
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn attach(&mut self) -> Result<[tokio::net::UnixStream; 3]> {
         if self.child.try_wait()?.is_some() {
             return Err(invalid("grant worker exited"));
@@ -187,6 +216,12 @@ pub fn serve() -> Result<()> {
                 .intersects(MsgFlags::MSG_TRUNC | MsgFlags::MSG_CTRUNC)
         {
             return Err(invalid("invalid worker dispatch"));
+        }
+        if byte == [0] && received.is_empty() {
+            return Ok(());
+        }
+        if byte != [1] {
+            return Err(invalid("invalid worker control command"));
         }
         let [down, up, control]: [UnixStream; 3] = received
             .try_into()

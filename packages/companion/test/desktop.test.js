@@ -66,3 +66,28 @@ test('offline revocation survives restart and waits for a matching authenticated
   offline.stop();
   restored.stop();
 });
+
+test('colliding approval IDs stay on their authenticated pairing', async () => {
+  const { Session } = await import('../src/session.js');
+  const sent = [];
+  const makeSession = (pairing, origin) => {
+    const session = new Session({ record:{id:pairing,origin,user:'user'}, native:{
+      listIdentities:async hints => [{selection:pairing, hints:JSON.parse(hints)}],
+    }});
+    session.device = {pairing,key:pairing+'-key',channel_generation:1};
+    session.send = (type,body) => {sent.push({pairing,type,body}); return 'fetch-'+pairing;};
+    return session;
+  };
+  const a = makeSession('first','https://one.example');
+  const b = makeSession('second','https://two.example');
+  const id = '4ba58db2-6899-4080-8de5-279d993203bf';
+  for (const session of [a,b]) {
+    await session.receive({type:'notify',body:{id}},() => true);
+  }
+  const body = {binding:{approval:id,device:a.device}, workload:{user:'user'}, expires_at_ms:Date.now()+20000};
+  await a.receive({type:'offer',body,request_id:'fetch-first'},() => true);
+  await b.receive({type:'offer',body,request_id:'fetch-second'},() => true);
+  assert.equal(a.offers.get(id).identities[0].selection,'first');
+  assert.equal(b.offers.size,0);
+  assert.deepEqual(sent.map(v=>[v.pairing,v.type,v.body.id]),[['first','fetch',id],['second','fetch',id]]);
+});

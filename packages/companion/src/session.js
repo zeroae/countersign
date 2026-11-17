@@ -235,7 +235,7 @@ export class Session extends EventEmitter {
       host: body.initiating_host, issued: Date.now(), cert: cert.certSha256, until: Math.min(Date.now()+seconds*1000, cert.expiresAtMs) };
     await this.store.update(this.record.id, r => {
       if (!r) throw new Error('Pairing retired.');
-      const receipts = Object.fromEntries(Object.entries(r.receipts).filter(([,v]) => v.until > Date.now()));
+      const receipts = Object.fromEntries(Object.entries(r.receipts).filter(([,v]) => v.until > Date.now() || v.revocation === 'pending'));
       return { ...r, receipts: { ...receipts, [body.binding.approval]: receipt } };
     });
     this.record = this.store.get(this.record.id);

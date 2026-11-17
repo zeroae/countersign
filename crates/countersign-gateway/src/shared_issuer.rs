@@ -31,7 +31,7 @@ pub enum SharedCaSource {
         key: PathBuf,
     },
     AcmPca {
-        region: String,
+        region: Option<String>,
         profile: Option<String>,
         endpoint: Option<String>,
         ca_arn: String,
@@ -135,8 +135,10 @@ impl SharedIssuer {
                 for cert in CertificateDer::pem_file_iter(anchors)? {
                     roots.add(cert?)?;
                 }
-                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                    .region(aws_sdk_acmpca::config::Region::new(region));
+                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+                if let Some(region) = region {
+                    loader = loader.region(aws_sdk_acmpca::config::Region::new(region));
+                }
                 if let Some(name) = profile {
                     loader = loader.profile_name(name);
                 }
@@ -281,6 +283,12 @@ impl SharedIssuer {
                 tokio::time::timeout(remaining.min(Duration::from_secs(30)), operation).await??
             }
         };
+        if chain.len() > countersign_protocol::wire::MAX_CERTIFICATES
+            || chain.iter().map(|cert| cert.len()).sum::<usize>()
+                > countersign_protocol::wire::MAX_CHAIN_BYTES
+        {
+            return Err("issuer returned an oversized chain".into());
+        }
         let leaf = chain.first().ok_or("missing signed certificate")?;
         let (rest, cert) = X509Certificate::from_der(leaf)?;
         let ext = cert.extended_key_usage()?.ok_or("missing leaf EKU")?.value;
