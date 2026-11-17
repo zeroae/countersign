@@ -96,7 +96,11 @@ impl Credentials {
         if key.len() < 32 || backend.len() < 32 || key == backend {
             return None;
         }
-        let signing_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        // Each reference Broker boot starts a new authority epoch. A token
+        // recovered from a prior process cannot authorize new traffic.
+        let root = hmac::Key::new(hmac::HMAC_SHA256, key);
+        let epoch_key = hmac::sign(&root, Uuid::new_v4().as_bytes());
+        let signing_key = hmac::Key::new(hmac::HMAC_SHA256, epoch_key.as_ref());
         let backend_tag = hmac::sign(&signing_key, backend);
         if gateway.is_some_and(|g| g.len() < 32 || g.as_bytes() == key || g.as_bytes() == backend) {
             return None;
@@ -192,4 +196,52 @@ pub(crate) fn fingerprint(data: &[u8]) -> [u8; 32] {
         .as_ref()
         .try_into()
         .expect("SHA-256 size")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn workload_audience_expiry_and_restart_epoch_are_enforced() {
+        let service = || {
+            Credentials::new(
+                &[0xa5; 32],
+                &[0x5a; 32],
+                Some("shared-gateway-dedicated-test-credential"),
+                Some("administrator-dedicated-test-credential"),
+                "integrator".into(),
+            )
+            .unwrap()
+        };
+        let creds = service();
+        let workload = serde_json::from_value(json!({
+            "integrator":"integrator","user":"u","context":"c","workload":"w","workload_generation":1
+        })).unwrap();
+        let (shared, end) = creds.issue(workload, 100, true).unwrap();
+        let service_secret = "shared-gateway-dedicated-test-credential";
+        assert!(creds.workload(&shared, 100, None).is_none());
+        assert!(creds.workload(&shared, 100, Some("other")).is_none());
+        let (binding, _) = creds.workload(&shared, 100, Some(service_secret)).unwrap();
+        assert!(creds.workload(&shared, end, Some(service_secret)).is_none());
+        assert!(creds.workload(&shared, 99, Some(service_secret)).is_none());
+        assert!(
+            service()
+                .workload(&shared, 100, Some(service_secret))
+                .is_none()
+        );
+        let (sidecar, _) = creds.issue(binding, 100, false).unwrap();
+        assert!(creds.workload(&sidecar, 100, None).is_some());
+        let body = shared.split('.').nth(1).unwrap();
+        let (head, _) = sidecar.split_once('.').unwrap();
+        let (_, sig) = sidecar.rsplit_once('.').unwrap();
+        assert!(
+            creds
+                .workload(&format!("{head}.{body}.{sig}"), 100, Some(service_secret))
+                .is_none()
+        );
+        assert!(!creds.backend_authorized(service_secret.as_bytes()));
+        assert!(!creds.admin_authorized(&[0x5a; 32]));
+    }
 }

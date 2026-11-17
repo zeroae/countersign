@@ -36,10 +36,10 @@ use time::OffsetDateTime;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream, UnixStream},
-    sync::{OwnedSemaphorePermit, Semaphore},
+    sync::{OwnedSemaphorePermit, Semaphore, watch},
     time::{Instant, timeout_at},
 };
-use x509_parser::prelude::{CertificateRevocationList, FromDer, parse_x509_certificate};
+use x509_parser::prelude::parse_x509_certificate;
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 fn invalid(message: &'static str) -> Box<dyn Error + Send + Sync> {
     io::Error::other(message).into()
@@ -56,26 +56,35 @@ struct Gateway {
     policy: DestinationPolicy,
     issuer: Issuer,
     broker: Broker,
+    observations: Arc<Semaphore>,
     children: Mutex<HashMap<Id, Slot>>,
 }
 struct Slot {
-    worker: Id,
-    workload: WorkloadBinding,
+    requests: Arc<Semaphore>,
+    user_requests: Arc<Semaphore>,
+    binding: GrantBinding,
     expires: u64,
-    process: ChildHandle,
+    process: Option<ChildHandle>,
+    fence: watch::Sender<bool>,
     connections: Arc<Semaphore>,
     handshakes: Arc<Semaphore>,
 }
 struct Assignment {
+    fence: watch::Receiver<bool>,
     down: UnixStream,
     up: UnixStream,
     control: UnixStream,
     connection: OwnedSemaphorePermit,
     handshake: OwnedSemaphorePermit,
+    requests: [Arc<Semaphore>; 2],
 }
 
 impl Gateway {
-    fn attach(&self, activate: &Activate) -> Result<Assignment> {
+    fn attach(
+        self: &Arc<Self>,
+        activate: &Activate,
+        credential: &Credential,
+    ) -> Result<Assignment> {
         let grant = &activate.grant;
         let now = utc_ms()?;
         let mut children = self
@@ -84,8 +93,9 @@ impl Gateway {
             .map_err(|_| invalid("worker registry unavailable"))?;
         children.retain(|_, s| s.expires > now);
         let owned = children.values().filter(|s| {
-            s.workload.integrator == grant.workload.integrator
-                && s.workload.user == grant.workload.user
+            s.process.is_some()
+                && s.binding.workload.integrator == grant.workload.integrator
+                && s.binding.workload.user == grant.workload.user
         });
         if owned
             .clone()
@@ -98,40 +108,105 @@ impl Gateway {
                 .sum::<usize>()
                 >= 16
         {
-            return Err(invalid("user capacity exceeded"));
+            return Err(Capacity.into());
         }
         if !children.contains_key(&grant.grant) {
-            if owned.count() >= 8 || children.len() >= 256 {
-                return Err(invalid("worker capacity exceeded"));
+            if owned.clone().count() >= 8
+                || children.values().filter(|s| s.process.is_some()).count() >= 256
+                || children.len() >= 4096
+            {
+                return Err(Capacity.into());
             }
+            let (fence, closed) = watch::channel(false);
             let slot = Slot {
-                worker: grant.worker.clone(),
-                workload: grant.workload.clone(),
+                fence,
+                requests: Arc::new(Semaphore::new(32)),
+                user_requests: owned
+                    .clone()
+                    .next()
+                    .map(|s| s.user_requests.clone())
+                    .unwrap_or_else(|| Arc::new(Semaphore::new(128))),
+                binding: grant.clone(),
                 expires: activate.expires_at_ms,
-                process: ChildHandle::launch()?,
+                process: Some(ChildHandle::launch()?),
                 connections: Arc::new(Semaphore::new(32)),
                 handshakes: Arc::new(Semaphore::new(4)),
             };
             children.insert(grant.grant.clone(), slot);
+            tokio::spawn(self.clone().watch_retirement(
+                grant.clone(),
+                credential.clone(),
+                activate.expires_at_ms,
+                closed,
+            ));
         }
         let slot = children.get_mut(&grant.grant).expect("present");
-        if slot.worker != grant.worker
-            || slot.workload != grant.workload
-            || slot.expires != activate.expires_at_ms
-        {
+        if &slot.binding != grant || slot.expires != activate.expires_at_ms {
             return Err(invalid("stale worker generation"));
         }
         let connection = slot.connections.clone().try_acquire_owned()?;
         let handshake = slot.handshakes.clone().try_acquire_owned()?;
-        let [down, up, control] = slot.process.attach()?;
+        let [down, up, control] = slot
+            .process
+            .as_mut()
+            .ok_or_else(|| invalid("worker fenced"))?
+            .attach()?;
         Ok(Assignment {
+            fence: slot.fence.subscribe(),
             down,
             up,
             control,
             connection,
             handshake,
+            requests: [slot.requests.clone(), slot.user_requests.clone()],
         })
     }
+    fn fence(&self, grant: &GrantBinding) {
+        if let Ok(mut children) = self.children.lock()
+            && let Some(slot) = children.get_mut(&grant.grant)
+            && &slot.binding == grant
+        {
+            slot.fence.send_replace(true);
+            slot.process.take(); // kill-on-drop, reaped asynchronously
+        }
+    }
+
+    async fn watch_retirement(
+        self: Arc<Self>,
+        grant: GrantBinding,
+        credential: Credential,
+        expires_at_ms: u64,
+        mut closed: watch::Receiver<bool>,
+    ) {
+        loop {
+            let remain = expires_at_ms.saturating_sub(utc_ms().unwrap_or(u64::MAX));
+            if remain == 0 || *closed.borrow() {
+                return;
+            }
+            let deadline = Instant::now() + Duration::from_millis(remain.min(25_000));
+            let reply = tokio::select! {
+                _ = closed.changed() => return,
+                result = self.broker.call("watch",&credential,GatewayToBroker::Watch(grant.clone()),deadline) => result,
+            };
+            if matches!(reply,Ok(BrokerToGateway::Retire(ref retired)) if retired == &grant) {
+                self.fence(&grant);
+                return;
+            }
+            // A lost notification or dead connection grants no authority. Both
+            // independently timed socket relays still require their own leases.
+            let delay = if matches!(reply,Ok(BrokerToGateway::NoChange(ref live)) if live == &grant)
+            {
+                1
+            } else {
+                4
+            };
+            tokio::select! {
+                _ = closed.changed() => return,
+                _ = tokio::time::sleep(Duration::from_secs(delay)) => {},
+            }
+        }
+    }
+
     fn credential(&self, req: &Request<Incoming>) -> Result<(Credential, WorkloadBinding)> {
         match &self.config.shared {
             Some(_) => {
@@ -173,24 +248,36 @@ struct Connection {
     origin: Origin,
     deadline: Instant,
     connection_id: Id,
+    ingress_instance: Id,
+    egress_instance: Id,
 }
 struct PeerTrust {
     roots: Vec<CertificateDer<'static>>,
     crls: Vec<rustls_pki_types::CertificateRevocationListDer<'static>>,
+    status_until: i64,
+    profile: Option<countersign_pki::Revocation>,
 }
 impl PeerTrust {
     fn load(rule: &Rule) -> Result<Self> {
+        let (crls, status_until) = match &rule.revocation {
+            Some(countersign_pki::Revocation::Crl { files }) => {
+                countersign_pki::crls(files, OffsetDateTime::now_utc().unix_timestamp())?
+            }
+            _ => (vec![], i64::MAX),
+        };
         Ok(Self {
             roots: config::anchors(&rule.roots)?,
-            crls: config::crls(&rule.crls)?,
+            crls,
+            status_until,
+            profile: rule.revocation.clone(),
         })
     }
-    fn validate(&self, host: &Origin, encoded: Vec<String>) -> Result<u64> {
+    fn validate(&self, host: &Origin, encoded: &[String]) -> Result<u64> {
         if encoded.is_empty() || encoded.len() > 16 {
             return Err(invalid("invalid upstream chain"));
         }
         let chain = encoded
-            .into_iter()
+            .iter()
             .map(|s| STANDARD.decode(s).map(CertificateDer::from))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut roots = RootCertStore::empty();
@@ -216,31 +303,72 @@ impl PeerTrust {
             &[],
             UnixTime::now(),
         )?;
-        let mut until = i64::MAX;
+        let mut until = self.status_until;
+        if let Some(countersign_pki::Revocation::Ocsp { files, max_age_s }) = &self.profile {
+            until = countersign_pki::validate_ocsp(
+                &chain,
+                &self.roots,
+                files,
+                *max_age_s,
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )?;
+        }
         for cert in chain {
             let (_, parsed) = parse_x509_certificate(&cert)
                 .map_err(|_| invalid("invalid upstream certificate"))?;
             until = until.min(parsed.validity.not_after.timestamp());
         }
-        for crl in &self.crls {
-            let (_, parsed) =
-                CertificateRevocationList::from_der(crl).map_err(|_| invalid("invalid CRL"))?;
-            until = until.min(
-                parsed
-                    .next_update()
-                    .ok_or_else(|| invalid("CRL expiry required"))?
-                    .timestamp(),
-            );
-        }
         Ok(u64::try_from(until)?.saturating_mul(1000))
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Gateway resource limit reached")]
+struct Capacity;
+fn admission_status(error: &(dyn Error + Send + Sync + 'static)) -> StatusCode {
+    if error.is::<tokio::time::error::Elapsed>() {
+        return StatusCode::GATEWAY_TIMEOUT;
+    }
+    if error.is::<Capacity>() || error.is::<tokio::sync::TryAcquireError>() {
+        return StatusCode::TOO_MANY_REQUESTS;
+    }
+    if let Some(e) = error.downcast_ref::<reqwest::Error>() {
+        if e.is_timeout() {
+            return StatusCode::GATEWAY_TIMEOUT;
+        }
+        return match e.status() {
+            Some(StatusCode::UNAUTHORIZED) => StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+            Some(StatusCode::TOO_MANY_REQUESTS) => StatusCode::TOO_MANY_REQUESTS,
+            Some(StatusCode::GONE | StatusCode::FORBIDDEN | StatusCode::CONFLICT) => {
+                StatusCode::FORBIDDEN
+            }
+            _ => StatusCode::SERVICE_UNAVAILABLE,
+        };
+    }
+    StatusCode::SERVICE_UNAVAILABLE
+}
 fn http_response(status: StatusCode) -> ReplyBody {
-    Response::builder()
-        .status(status)
-        .body(Empty::new())
-        .expect("fixed response")
+    let mut builder = Response::builder().status(status);
+    if !status.is_success() {
+        let code = match status {
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED => "authentication_required",
+            StatusCode::FORBIDDEN => "denied",
+            StatusCode::TOO_MANY_REQUESTS => "busy",
+            StatusCode::GATEWAY_TIMEOUT => "timeout",
+            StatusCode::SERVICE_UNAVAILABLE => "unavailable",
+            StatusCode::BAD_GATEWAY => "upstream_failure",
+            _ => "invalid_request",
+        };
+        let request_id = id();
+        builder = builder
+            .header("Countersign-Error", code)
+            .header("Countersign-Request-ID", request_id.as_str());
+        if status == StatusCode::PROXY_AUTHENTICATION_REQUIRED {
+            builder = builder.header(header::PROXY_AUTHENTICATE, "Bearer");
+        }
+        eprintln!("Gateway CONNECT {} {code}", request_id.as_str());
+    }
+    builder.body(Empty::new()).expect("fixed response")
 }
 async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> ReplyBody {
     if req.method() != Method::CONNECT {
@@ -257,6 +385,7 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
     };
     if req.uri().scheme().is_some()
         || req.uri().path_and_query().is_some()
+        || req.headers().get_all(header::HOST).iter().count() > 1
         || req.headers().get_all(header::HOST).iter().any(|value| {
             value
                 .to_str()
@@ -280,12 +409,13 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
     else {
         return http_response(StatusCode::FORBIDDEN);
     };
-    let Ok(response) = gateway
+    let response = match gateway
         .broker
         .admit(&credential, &workload, &origin, deadline)
         .await
-    else {
-        return http_response(StatusCode::FORBIDDEN);
+    {
+        Ok(response) => response,
+        Err(error) => return http_response(admission_status(error.as_ref())),
     };
     let activate = &response.activation;
     if !gateway.policy.covers(&activate.grant.scope, &origin) {
@@ -309,9 +439,9 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
             deadline
         )
     );
-    let Ok((ingress, egress)) = legs else {
-        eprintln!("Gateway lease admission unavailable");
-        return http_response(StatusCode::SERVICE_UNAVAILABLE);
+    let (ingress, egress) = match legs {
+        Ok(legs) => legs,
+        Err(error) => return http_response(admission_status(error.as_ref())),
     };
     let Ok(trust) = PeerTrust::load(rule) else {
         return http_response(StatusCode::BAD_GATEWAY);
@@ -327,11 +457,12 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
     if ingress.guard.check().is_err() || egress.guard.check().is_err() {
         return http_response(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let assignment = match gateway.attach(activate) {
+    let assignment = match gateway.attach(activate, &credential) {
         Ok(slot) => slot,
         Err(error) => {
-            eprintln!("Gateway worker admission failed: {error}");
-            return http_response(StatusCode::SERVICE_UNAVAILABLE);
+            let kind = error.downcast_ref::<io::Error>().map(|e| e.kind());
+            eprintln!("Gateway worker admission unavailable ({kind:?})");
+            return http_response(admission_status(error.as_ref()));
         }
     };
     let upgraded = hyper::upgrade::on(req);
@@ -342,24 +473,39 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
         origin,
         deadline,
         connection_id: id(),
+        ingress_instance: ingress.request.instance.clone(),
+        egress_instance: egress.request.instance.clone(),
     };
     tokio::spawn(async move {
         let Ok(Ok(downstream)) = timeout_at(deadline, upgraded).await else {
             return;
         };
         let guards = [ingress.guard.clone(), egress.guard.clone()];
-        let assignment = assignment;
+        let mut fence = assignment.fence;
         let _connection = assignment.connection;
         let (stage, result) = tokio::select! {
             biased;
+            _=fence.changed()=>("fence",Err(invalid("grant retired"))),
             r=ingress.relay(TokioIo::new(downstream),assignment.down,&connection.gateway.broker,&connection.credential,expiry)=>("ingress",r),
             r=egress.relay(target,assignment.up,&connection.gateway.broker,&connection.credential,expiry)=>("egress",r),
-            r=connection.handshake(assignment.control,trust,guards,assignment.handshake)=>("handshake",r),
+            r=connection.handshake(assignment.control,trust,guards.clone(),assignment.handshake,assignment.requests)=>("handshake",r),
         };
+        // All selected and unselected relay futures (and their socket handles)
+        // have been dropped. Observations never gate or delay socket closure.
+        connection.observe(ObservationKind::IngressClosed);
+        connection.observe(ObservationKind::EgressClosed);
+        let lapsed = result.as_ref().is_err_and(|e| e.is::<relay::LeaseLost>())
+            || guards.iter().any(|guard| guard.check().is_err());
+        if lapsed {
+            connection
+                .gateway
+                .fence(&connection.response.activation.grant);
+        }
         if let Err(error) = result {
             eprintln!(
-                "Gateway connection {} ended at {stage}: {error}",
-                connection.connection_id.as_str()
+                "Gateway connection {} ended at {stage} ({:?})",
+                connection.connection_id.as_str(),
+                error.downcast_ref::<io::Error>().map(|e| e.kind())
             );
         }
     });
@@ -367,6 +513,37 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
 }
 
 impl Connection {
+    fn observe(&self, observation: ObservationKind) {
+        let Ok(permit) = self.gateway.observations.clone().try_acquire_owned() else {
+            return;
+        };
+        let gateway = self.gateway.clone();
+        let credential = self.credential.clone();
+        let enforcer = if observation == ObservationKind::IngressClosed {
+            &self.ingress_instance
+        } else {
+            &self.egress_instance
+        };
+        let report = Observed {
+            grant: self.response.activation.grant.clone(),
+            host: self.origin.clone(),
+            tls_connection: self.connection_id.clone(),
+            enforcer_instance: enforcer.clone(),
+            observation,
+        };
+        tokio::spawn(async move {
+            let _permit = permit;
+            let _ = gateway
+                .broker
+                .call(
+                    "observe",
+                    &credential,
+                    GatewayToBroker::Observed(report),
+                    Instant::now() + Duration::from_secs(3),
+                )
+                .await;
+        });
+    }
     fn check(&self, guards: &[Guard; 2]) -> Result<()> {
         if Instant::now() >= self.deadline {
             return Err(invalid("handshake timed out"));
@@ -380,10 +557,11 @@ impl Connection {
         trust: PeerTrust,
         guards: [Guard; 2],
         permit: OwnedSemaphorePermit,
+        requests: [Arc<Semaphore>; 2],
     ) -> Result<()> {
         let grant = &self.response.activation.grant;
         let expiry = self.response.activation.expires_at_ms;
-        let evidence_deadline = timeout_at(self.deadline, async {
+        let (evidence_deadline, peer_chain) = timeout_at(self.deadline, async {
             let start = Start {
                 origin: self.origin.clone(),
                 activation: self.response.clone(),
@@ -416,11 +594,28 @@ impl Connection {
                 &Reply::Certificates(chain.iter().map(|c| STANDARD.encode(c)).collect()),
             )
             .await?;
-            let CommandMessage::Sign { tls, scheme, input } = worker::receive(&mut control).await?
+            let CommandMessage::Sign {
+                tls,
+                scheme,
+                input,
+                peer_chain,
+            } = worker::receive(&mut control).await?
             else {
                 return Err(invalid("expected signing request"));
             };
             self.check(&guards)?;
+            let cap = trust
+                .validate(&self.origin, &peer_chain)?
+                .min(expiry)
+                .saturating_sub(self.gateway.config.clock_uncertainty_ms);
+            let wall = utc_ms()?;
+            if cap <= wall {
+                return Err(invalid("upstream validation expired"));
+            }
+            self.check(&guards)?;
+            for guard in &guards {
+                guard.cap(cap)?;
+            }
             let op = Operation {
                 grant: grant.clone(),
                 host: self.origin.clone(),
@@ -469,28 +664,97 @@ impl Connection {
             )
             .await?;
             cancel.operation.take();
-            let CommandMessage::Ready { peer_chain } = worker::receive(&mut control).await? else {
+            let CommandMessage::Ready = worker::receive(&mut control).await? else {
                 return Err(invalid("expected upstream confirmation"));
             };
-            let cap = trust
-                .validate(&self.origin, peer_chain)?
-                .min(expiry)
-                .saturating_sub(self.gateway.config.clock_uncertainty_ms);
-            let wall = utc_ms()?;
-            if cap <= wall {
-                return Err(invalid("upstream validation expired"));
-            }
-            self.check(&guards)?;
-            for guard in &guards {
-                guard.cap(cap)?;
-            }
             worker::send(&mut control, &Reply::Proceed).await?;
-            Ok(Instant::now() + Duration::from_millis(cap - wall))
+            Ok((
+                Instant::now() + Duration::from_millis(cap.saturating_sub(utc_ms()?)),
+                peer_chain,
+            ))
         })
         .await??;
         drop(permit);
-        tokio::time::sleep_until(evidence_deadline).await;
-        Ok(())
+        tokio::select! {
+            result=self.refresh_peer(&peer_chain, &guards)=>result,
+            result=admit_streams(control, &guards, requests, evidence_deadline, || self.observe(ObservationKind::MtlsAccepted))=>result,
+        }
+    }
+    async fn refresh_peer(&self, chain: &[String], guards: &[Guard; 2]) -> Result<()> {
+        let rule = self
+            .gateway
+            .config
+            .destinations
+            .iter()
+            .find(|r| r.id == self.response.activation.grant.scope.entry_id())
+            .ok_or_else(|| invalid("missing destination rule"))?;
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            guards[0].check()?;
+            guards[1].check()?;
+            let trust = PeerTrust::load(rule)?;
+            let cap = trust
+                .validate(&self.origin, chain)?
+                .saturating_sub(self.gateway.config.clock_uncertainty_ms);
+            for guard in guards {
+                guard.cap(cap)?;
+            }
+        }
+    }
+}
+async fn admit_streams(
+    mut control: UnixStream,
+    guards: &[Guard; 2],
+    requests: [Arc<Semaphore>; 2],
+    evidence_deadline: Instant,
+    accepted: impl FnOnce(),
+) -> Result<()> {
+    let mut accepted = Some(accepted);
+    let mut active = HashMap::new();
+    loop {
+        let message = timeout_at(evidence_deadline, worker::receive(&mut control)).await?;
+        match message {
+            Ok(CommandMessage::UpstreamResponse) if !active.is_empty() => {
+                guards[0].check()?;
+                guards[1].check()?;
+                accepted
+                    .take()
+                    .ok_or_else(|| invalid("duplicate upstream observation"))?();
+            }
+            Ok(CommandMessage::OpenStream(id)) => {
+                guards[0].check()?;
+                guards[1].check()?;
+                if active.contains_key(&id) {
+                    return Err(invalid("duplicate stream ID"));
+                }
+                let grant = requests[0].clone().try_acquire_owned();
+                let user = requests[1].clone().try_acquire_owned();
+                let admitted = match (grant, user) {
+                    (Ok(a), Ok(b)) => {
+                        active.insert(id, (a, b));
+                        true
+                    }
+                    _ => false,
+                };
+                worker::send(&mut control, &Reply::StreamGranted(admitted)).await?;
+            }
+            Ok(CommandMessage::CloseStream(id)) => {
+                if active.remove(&id).is_none() {
+                    return Err(invalid("unknown stream ID"));
+                }
+            }
+            Err(error)
+                if error
+                    .downcast_ref::<io::Error>()
+                    .is_some_and(|e| e.kind() == io::ErrorKind::UnexpectedEof) =>
+            {
+                drop(active);
+                // Other guarded endpoints may still be draining the final response.
+                tokio::time::sleep_until(evidence_deadline).await;
+                return Ok(());
+            }
+            _ => return Err(invalid("invalid worker stream operation")),
+        }
     }
 }
 
@@ -582,6 +846,7 @@ pub async fn run(args: &[String]) -> Result<()> {
         issuer,
         broker,
         policy,
+        observations: Arc::new(Semaphore::new(256)),
         children: Mutex::new(HashMap::new()),
     });
     let cleanup = gateway.clone();

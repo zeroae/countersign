@@ -136,19 +136,113 @@ async fn enroll(s: &Service, sock: &mut WebSocket, id: w::Id, enroll: w::Enroll)
         purpose: w::ProofPurpose::Pair { attempt },
     })
 }
+fn reconnect(a: &Authority, req: w::Authenticate) -> Result<Login> {
+    let (user, public) = a.store.connection.query_row(
+        "SELECT user_id,public_sec1 FROM enrollment WHERE integrator=?1 AND pairing=?2 AND key_id=?3",
+        params![a.integrator.as_str(), req.pairing.as_str(), req.key.as_str()],
+        |r| Ok((r.get::<_,String>(0)?, r.get::<_,Vec<u8>>(1)?)),
+    ).optional()?.ok_or(Fault::Denied)?;
+    Ok(Login {
+        user: w::Id::new(user).map_err(|_| Fault::Storage)?,
+        pairing: req.pairing.clone(),
+        key: req.key,
+        public,
+        purpose: w::ProofPurpose::Reconnect {
+            pairing: req.pairing,
+        },
+    })
+}
+
+fn finish_login(
+    a: &mut Authority,
+    login: Login,
+    expires: u64,
+    address: Option<String>,
+    channel: mpsc::Sender<w::Frame<B>>,
+) -> Result<w::DeviceBinding> {
+    let at = clock_ms()?;
+    if at >= expires {
+        return Err(Fault::Expired);
+    }
+    let owner = Owner {
+        integrator: a.integrator.as_str().into(),
+        user: login.user.as_str().into(),
+    };
+    let tx = a
+        .store
+        .connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let paired = matches!(login.purpose, w::ProofPurpose::Pair { .. });
+    if paired {
+        let devices: i64 = tx.query_row(
+            "SELECT count(*) FROM enrollment WHERE integrator=?1 AND user_id=?2",
+            params![owner.integrator, owner.user],
+            |r| r.get(0),
+        )?;
+        if devices >= 64 {
+            return Err(Fault::Busy);
+        }
+        tx.execute(
+            "INSERT INTO enrollment(pairing,user_id,integrator,key_id,public_sec1) VALUES (?1,?2,?3,?4,?5)",
+            params![login.pairing.as_str(), owner.user, owner.integrator, login.key.as_str(), login.public],
+        )?;
+    } else {
+        let current: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM enrollment WHERE pairing=?1 AND key_id=?2 AND user_id=?3 AND integrator=?4 AND public_sec1=?5)",
+            params![login.pairing.as_str(),login.key.as_str(),owner.user,owner.integrator,login.public],
+            |r| r.get(0),
+        )?;
+        if !current {
+            return Err(Fault::Denied);
+        }
+    }
+    let session =
+        crate::sqlite::advance_device(&tx, &owner, login.pairing.as_str(), login.key.as_str())?;
+    let device = w::DeviceBinding {
+        pairing: login.pairing,
+        key: login.key,
+        channel_generation: NonZeroU64::new(session.generation as u64).ok_or(Fault::Storage)?,
+    };
+    let others = a
+        .peers
+        .values()
+        .filter(|p| p.session.owner == owner && p.binding.pairing != device.pairing)
+        .map(|p| p.binding.clone())
+        .collect();
+    let event = controls::record_connection(&tx, &owner, &device, address, others, paired, at)?;
+    tx.commit()?;
+
+    a.waiting
+        .retain(|_, w| w.op.grant.device.pairing != device.pairing);
+    let peer = Peer {
+        session,
+        binding: device.clone(),
+        send: channel,
+    };
+    for grant in a.grants.values_mut().filter(|g| {
+        g.activation.grant.device.pairing == device.pairing
+            && g.activation.grant.device.key == device.key
+            && g.activation.expires_at_ms > at
+    }) {
+        grant.activation.grant.device = device.clone();
+        grant.acknowledged = false;
+        send(&peer, fresh(), B::Activate(grant.activation.clone()))?;
+    }
+    a.peers.insert(device.pairing.as_str().into(), peer);
+    if let Some(id) = event {
+        a.notify(&owner.user, id);
+    }
+    Ok(device)
+}
+
 async fn run(sock: &mut WebSocket, s: Service, address: Option<String>) -> Result<()> {
     let first = timeout(Duration::from_secs(10), receive(sock))
         .await
         .map_err(|_| Fault::Expired)??;
-    let login=match first.message {
-        C::Enroll(req)=>enroll(&s,sock,first.request_id.clone(),req).await?,
-        C::Authenticate(req)=>s.apply(move|a|{
-            let (user,public)=a.store.connection.query_row("SELECT user_id,public_sec1 FROM enrollment WHERE integrator=?1 AND pairing=?2 AND key_id=?3",
-            params![a.integrator.as_str(),req.pairing.as_str(),req.key.as_str()],|r| Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?))).optional()?.ok_or(Fault::Denied)?;
-            Ok(Login{user:w::Id::new(user).map_err(|_|Fault::Storage)?,pairing:req.pairing.clone(),key:req.key,public,
-                purpose:w::ProofPurpose::Reconnect{pairing:req.pairing}})
-        }).await?,
-        _=>return Err(Fault::Unauthenticated),
+    let login = match first.message {
+        C::Enroll(req) => enroll(&s, sock, first.request_id.clone(), req).await?,
+        C::Authenticate(req) => s.apply(move |a| reconnect(a, req)).await?,
+        _ => return Err(Fault::Unauthenticated),
     };
     let origin = s.apply(|a| Ok(a.origin.clone())).await?;
     let at = clock_ms()?;
@@ -179,53 +273,12 @@ async fn run(sock: &mut WebSocket, s: Service, address: Option<String>) -> Resul
         _ => return Err(Fault::Unauthenticated),
     }
     let (tx, mut rx) = mpsc::channel(32);
-    let device=s.apply(move|a|{
-        if matches!(login.purpose,w::ProofPurpose::Pair{..}){
-            a.store.connection.execute("INSERT INTO enrollment(pairing,user_id,integrator,key_id,public_sec1) VALUES (?1,?2,?3,?4,?5)",
-                params![login.pairing.as_str(),login.user.as_str(),a.integrator.as_str(),login.key.as_str(),login.public])?;
-        }else {
-            let active=a.store.connection.query_row("SELECT EXISTS(SELECT 1 FROM enrollment WHERE pairing=?1 AND key_id=?2 AND user_id=?3 AND integrator=?4)",
-                params![login.pairing.as_str(),login.key.as_str(),login.user.as_str(),a.integrator.as_str()],|r|r.get::<_,bool>(0))?;
-            if !active{return Err(Fault::Denied);}
-        }
-        let session=a.store.authenticate_device(&Owner{integrator:a.integrator.as_str().into(),user:login.user.as_str().into()},login.pairing.as_str(),login.key.as_str())?;
-        let b=w::DeviceBinding{pairing:login.pairing,key:login.key,channel_generation:NonZeroU64::new(session.generation as u64).ok_or(Fault::Storage)?};
-        a.waiting.retain(|_,w|w.op.grant.device.pairing!=b.pairing);
-        let peer=Peer{session,binding:b.clone(),send:tx};
-        for grant in a.grants.values_mut().filter(|g| g.activation.grant.device.pairing==b.pairing && g.activation.grant.device.key==b.key && g.activation.expires_at_ms>at) {
-            grant.activation.grant.device=b.clone();
-            grant.acknowledged=false;
-            send(&peer,fresh(),B::Activate(grant.activation.clone()))?;
-        }
-        a.peers.insert(b.pairing.as_str().into(),peer);
-        super::controls::connected(a,login.user.as_str(),&b,address)?;
-        Ok(b)
-    }).await?;
+    let device = s
+        .apply(move |a| finish_login(a, login, ch.expires_at_ms, address, tx))
+        .await?;
     let auth = write(sock, proof.request_id, B::Authenticated(device.clone())).await;
     if auth.is_ok() {
-        loop {
-            tokio::select! {
-                outgoing=rx.recv()=>match outgoing {
-                    Some(w::Frame{request_id,message}) => if write(sock,request_id,message).await.is_err(){break;},
-                    None=>break,
-                },
-                incoming=receive(sock)=> {
-                    let Ok(frame)=incoming else{break;};
-                    let d=device.clone();
-                    let id=frame.request_id.clone();
-                    let result=s.apply(move|a|handle(a,&d,frame)).await;
-                    let message=match result{
-                        Ok(Some(msg))=>msg,Ok(None)=>continue,
-                        Err(f)=>B::Error(w::Rejection{code:match f {
-                            Fault::Invalid=>w::ErrorCode::InvalidRequest,Fault::Denied=>w::ErrorCode::Denied,
-                            Fault::Expired=>w::ErrorCode::Expired,Fault::Resolved=>w::ErrorCode::AlreadyResolved,
-                            Fault::Busy=>w::ErrorCode::Busy,_=>w::ErrorCode::Unavailable,
-                        }}),
-                    };
-                    if write(sock,id,message).await.is_err(){break;}
-                }
-            }
-        }
+        serve_authenticated(sock, &s, &device, &mut rx).await;
     }
     s.apply(move |a| {
         if a.peers
@@ -239,6 +292,60 @@ async fn run(sock: &mut WebSocket, s: Service, address: Option<String>) -> Resul
     })
     .await?;
     auth
+}
+
+async fn serve_authenticated(
+    sock: &mut WebSocket,
+    service: &Service,
+    device: &w::DeviceBinding,
+    rx: &mut mpsc::Receiver<w::Frame<B>>,
+) {
+    let mut heartbeats = tokio::time::interval(Duration::from_secs(30));
+    heartbeats.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeats.tick().await;
+    let mut expected_pong = None;
+    loop {
+        tokio::select! {
+            outgoing = rx.recv() => {
+                let Some(frame) = outgoing else { break };
+                if write(sock,frame.request_id,frame.message).await.is_err() {break;}
+            },
+            _ = heartbeats.tick() => {
+                if expected_pong.is_some() {break;}
+                let ping = Uuid::new_v4().into_bytes();
+                if !matches!(timeout(Duration::from_secs(5),sock.send(Message::Ping(ping.to_vec().into()))).await,Ok(Ok(()))) {break;}
+                expected_pong=Some(ping);
+            }
+            incoming = sock.recv() => {
+                let frame = match incoming {
+                    Some(Ok(Message::Text(text))) => match w::Frame::<C>::decode(text.as_bytes()) {
+                        Ok(frame)=>frame,Err(_)=>break,
+                    },
+                    Some(Ok(Message::Pong(bytes))) => {
+                        if expected_pong.as_ref().is_some_and(|p| p.as_slice()==bytes.as_ref()) {expected_pong=None;}
+                        continue;
+                    },
+                    Some(Ok(Message::Ping(payload))) => {
+                        if !matches!(timeout(Duration::from_secs(5),sock.send(Message::Pong(payload))).await,Ok(Ok(()))) {break;}
+                        continue;
+                    },
+                    _ => break,
+                };
+                let d=device.clone();
+                let id=frame.request_id.clone();
+                let message=match service.apply(move |a|handle(a,&d,frame)).await {
+                    Ok(Some(msg)) => msg,
+                    Ok(None) => continue,
+                    Err(error) => B::Error(w::Rejection {code: match error {
+                        Fault::Invalid=>w::ErrorCode::InvalidRequest, Fault::Denied=>w::ErrorCode::Denied,
+                        Fault::Expired=>w::ErrorCode::Expired, Fault::Resolved=>w::ErrorCode::AlreadyResolved,
+                        Fault::Busy=>w::ErrorCode::Busy, _=>w::ErrorCode::Unavailable,
+                    }}),
+                };
+                if write(sock,id,message).await.is_err() {break;}
+            }
+        }
+    }
 }
 
 fn offer(
@@ -270,6 +377,11 @@ fn offer(
         return Err(Fault::Denied);
     }
     Ok(w::Offer {
+        identity_hints: a
+            .validators
+            .get(scope.entry_id())
+            .ok_or(Fault::Denied)?
+            .hints(b.user.as_str()),
         binding: w::OfferBinding {
             approval: wire_id(id),
             approval_version: NonZeroU64::MIN,
@@ -293,6 +405,12 @@ fn handle(a: &mut Authority, device: &w::DeviceBinding, frame: w::Frame<C>) -> R
         .filter(|p| p.binding == *device)
         .ok_or(Fault::Unauthenticated)?;
     match frame.message {
+        C::RevokeApproval(n) => {
+            let owner = p.session.owner.clone();
+            let affected = a.store.revoke(&owner, Some(&p.session), uid(&n.id)?)?;
+            controls::withdraw(a, &owner, affected);
+            Ok(Some(B::RevokeRecorded(n)))
+        }
         C::Devices(_) => Ok(Some(B::Devices(super::controls::devices(a, device)?))),
         C::ForgetDevices(req) => {
             let user = p.session.owner.user.clone();
@@ -433,7 +551,7 @@ fn decide(
                     },
                     duration_seconds: duration_s,
                 },
-                Some(chain),
+                Some((chain, valid.evidence_end)),
             )
         }
     };
@@ -451,7 +569,7 @@ fn decide(
         return Err(Fault::Resolved);
     }
     a.notify(offered.workload.user.as_str(), d.binding.approval.clone());
-    if let Some(chain) = chain {
+    if let Some((chain, evidence_end)) = chain {
         let g = a
             .store
             .approved_grant(&binding(&offered.workload), approval_id)?
@@ -490,9 +608,19 @@ fn decide(
             offer: d.binding.offer,
             expires_at_ms: g.expires_at as u64 * 1000,
         };
+        a.store.bind_activation(
+            &binding(&act.grant.workload),
+            &act,
+            &chain,
+            at,
+            u64::try_from(evidence_end)
+                .map_err(|_| Fault::Expired)?
+                .saturating_mul(1000),
+        )?;
         a.grants.insert(
             act.grant.grant.as_str().to_owned(),
             LiveGrant {
+                retire_signal: tokio::sync::watch::channel(()).0,
                 gateway_boot: None,
                 activation: act.clone(),
                 chain,

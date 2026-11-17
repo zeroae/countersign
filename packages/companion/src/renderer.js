@@ -83,7 +83,9 @@ function offerCard(offer) {
       element('small', 'SHA-256 ' + cert.fingerprint));
     picker.append(label);
   }
-  if (!identities.length) picker.append(element('p', 'No eligible installed certificate is available for this request.'));
+  if (!identities.length) picker.append(element('p', offer.providerUnavailable ?
+    'The certificate provider is unavailable. Unlock or reconnect it and request access again.' :
+    'No eligible installed certificate is available for this request.'));
   const label = element('label', 'Duration (seconds) ');
   label.append(duration);
   duration.addEventListener('input', update);
@@ -128,7 +130,19 @@ async function render() {
       }
       if(pairing.devices.length > 1) card.append(button('Disconnect all other devices',()=>forget(pairing.devices,true)));
     }
-    card.append(button('Forget pairing', () => {
+    for (const approval of pairing.approvals) {
+      const status = approval.revocation === 'pending' ? 'Revocation queued for Broker confirmation' :
+        approval.revocation === 'recorded' ? 'Broker recorded revocation. Existing traffic ends at its lease deadline.' :
+        approval.ready ? 'Ready for handshakes' : 'Approved on this device';
+      card.append(element('h3', approval.host), element('p', approval.context + ' · ' + approval.scope),
+        element('small', 'SHA-256 ' + approval.fingerprint),
+        element('p', status + ' · Expires ' + new Date(approval.until).toLocaleString()));
+      if (approval.revocation !== 'recorded') card.append(button(approval.revocation ? 'Retry revocation' : 'Revoke access', () => api.revoke(pairing.id, approval.id)));
+    }
+    card.append(button('Remove from this computer', () => {
+      if (window.confirm('Delete this local pairing key? Use the Integrator to revoke existing remote access.')) return api.removeLocal(pairing.id);
+    }));
+    card.append(button('Revoke pairing at Integrator', () => {
       if (window.confirm('Forget the pairing with ' + pairing.origin + ' and revoke its grants?')) return api.forget(pairing.id);
     }));
     return card;

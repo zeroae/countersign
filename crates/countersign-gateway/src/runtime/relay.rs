@@ -16,6 +16,10 @@ use std::{
 use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::time::Instant;
 
+#[derive(Debug, thiserror::Error)]
+#[error("required authorization lease lapsed")]
+pub struct LeaseLost;
+
 #[derive(Clone)]
 pub struct Guard(Arc<RwLock<Lease>>, Arc<AtomicU64>);
 impl Guard {
@@ -139,10 +143,23 @@ impl EnforcedLeg {
             io: b,
             guard: self.guard.clone(),
         };
+        let egress = matches!(
+            self.request.enforcer,
+            countersign_protocol::wire::Enforcer::Egress
+        );
+        let renew = self.renew(broker, credential, expiry);
+        tokio::pin!(renew);
         tokio::select! {
             biased;
-            result=self.renew(broker,credential,expiry)=>result,
-            result=io::copy_bidirectional(&mut a,&mut b)=>{result?;Ok(())},
+            result=&mut renew => result.map_err(|_|Box::new(LeaseLost) as _),
+            result=io::copy_bidirectional(&mut a,&mut b)=>{
+                result?;
+                // The site may close immediately after its last response byte.
+                // Allow the worker to deliver that response under the original
+                // independent leases until the downstream leg finishes.
+                drop((a,b));
+                if egress { renew.await.map_err(|_|Box::new(LeaseLost) as _) } else { Ok(()) }
+            },
         }
     }
 }

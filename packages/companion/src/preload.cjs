@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('countersign', {
   deny: offer => ipcRenderer.invoke('desktop:deny', offer),
   theme: (pairing, digest) => ipcRenderer.invoke('desktop:theme', pairing, digest),
   forgetOthers: (pairing, ids, all) => ipcRenderer.invoke('desktop:forgetOthers', pairing, ids, all),
+  revoke: (pairing, approval) => ipcRenderer.invoke('desktop:revoke', pairing, approval),
+  removeLocal: pairing => ipcRenderer.invoke('desktop:removeLocal', pairing),
   forget: pairing => ipcRenderer.invoke('desktop:forget', pairing),
   login: enabled => ipcRenderer.invoke('desktop:login', enabled),
   changed: callback => {

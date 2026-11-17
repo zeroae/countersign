@@ -16,6 +16,10 @@ export class Session extends EventEmitter {
     Object.assign(this, options);
     this.offers = new Map();
     this.active = new Map();
+    this.activations = new Map();
+    this.blockedApprovals = new Set();
+    this.revokeRequests = new Map();
+    this.warned = new Set();
     this.fetches = new Map();
     this.status = 'Offline';
     this.devices = [];
@@ -60,6 +64,8 @@ export class Session extends EventEmitter {
       this.offers.clear();
       for (const binding of this.active.values()) this.native.retireScope(JSON.stringify(binding));
       this.active.clear();
+      this.activations.clear();
+      this.revokeRequests.clear();
       this.status = 'Offline';
       this.emit('changed');
       if (!this.closed && this.record.pairing) {
@@ -111,6 +117,10 @@ export class Session extends EventEmitter {
       this.device = body;
       this.retryMs = 1000;
       this.challenge = null;
+      for (const [approval, receipt] of Object.entries(this.record.receipts ?? {})) {
+        if (receipt.revocation === 'pending') this.sendRevocation(approval);
+      }
+      this.updateReminders();
       this.send('inbox', {});
       this.send('devices', {});
       void this.refreshBrand().catch(() => {});
@@ -139,11 +149,27 @@ export class Session extends EventEmitter {
       this.fetches.delete(id);
       if (body.binding.approval !== approval || body.workload.user !== r.user ||
           !isDeepStrictEqual(body.binding.device, this.device) || body.expires_at_ms <= Date.now()) return;
-      const identities = await this.native.listIdentities(JSON.stringify(body.identity_hints ?? {}));
+      let identities = [], providerUnavailable = false;
+      try {
+        identities = await this.native.listIdentities(JSON.stringify(body.identity_hints ?? {}));
+      } catch {
+        providerUnavailable = true;
+      }
       if (!current() || body.expires_at_ms <= Date.now()) return;
-      this.offers.set(approval, { handle: randomUUID(), body, identities });
+      this.offers.set(approval, { handle: randomUUID(), body, identities, providerUnavailable });
+      this.emit('changed');
+    } else if (type === 'revoke_recorded') {
+      if (this.revokeRequests.get(id) !== body.id) return;
+      await this.store.update(r.id, record => {
+        const receipt = record.receipts[body.id];
+        if (receipt?.revocation !== 'pending') return record;
+        return { ...record, receipts: { ...record.receipts, [body.id]: { ...receipt, revocation: 'recorded' } } };
+      });
+      this.record = this.store.get(r.id);
+      this.revokeRequests.delete(id);
       this.emit('changed');
     } else if (type === 'error') {
+      this.revokeRequests.delete(id);
       const key = this.fetches.get(id);
       this.fetches.delete(id);
       if (key) this.offers.delete(key);
@@ -155,7 +181,7 @@ export class Session extends EventEmitter {
           body.deadline_ms <= Date.now()) { this.send('cancel', body.binding, id); return; }
       // Keep cancellation and transport events responsive while the native provider waits.
       void this.native.signTls(JSON.stringify(body)).then(signature => {
-        if (current() && this.active.has(body.binding.grant.grant) && body.deadline_ms > Date.now())
+        if (current() && isDeepStrictEqual(this.active.get(body.binding.grant.grant), body.binding.grant) && body.deadline_ms > Date.now())
           this.send('signed', { binding: body.binding, signature }, id);
       }).catch(() => { if (current()) this.send('cancel', body.binding, id); });
     } else if (type === 'cancel') {
@@ -163,6 +189,8 @@ export class Session extends EventEmitter {
     } else if (type === 'retire') {
       if (isDeepStrictEqual(this.active.get(body.grant),body)) {
         this.active.delete(body.grant);
+        this.activations.delete(body.grant);
+        this.emit('changed');
         await this.native.retireScope(JSON.stringify(body));
       }
     } else throw new Error('Unsupported control message.');
@@ -204,13 +232,15 @@ export class Session extends EventEmitter {
     if (!cert || createHash('sha256').update(Buffer.from(cert.chain[0], 'base64')).digest('base64') !== cert.certSha256)
       throw new Error('The selected identity is no longer available.');
     const receipt = { offer: body.binding.offer, workload: body.workload, scope: body.scope,
-      cert: cert.certSha256, until: Math.min(Date.now()+seconds*1000, cert.expiresAtMs) };
+      host: body.initiating_host, issued: Date.now(), cert: cert.certSha256, until: Math.min(Date.now()+seconds*1000, cert.expiresAtMs) };
     await this.store.update(this.record.id, r => {
       if (!r) throw new Error('Pairing retired.');
       const receipts = Object.fromEntries(Object.entries(r.receipts).filter(([,v]) => v.until > Date.now()));
       return { ...r, receipts: { ...receipts, [body.binding.approval]: receipt } };
     });
     this.record = this.store.get(this.record.id);
+    this.updateReminders();
+    this.emit('changed');
     if (!isDeepStrictEqual(body.binding.device, this.device)) throw new Error('Connection changed.');
     this.send('decide', { binding: body.binding, answer: { approve: {
       duration_s: seconds, chain: cert.chain, cert_sha256: cert.certSha256,
@@ -220,20 +250,72 @@ export class Session extends EventEmitter {
   async activate(body, id, current) {
     const grant = body.grant;
     const receipt = this.store.get(this.record.id)?.receipts?.[body.approval];
+    if (receipt?.revocation || this.blockedApprovals.has(body.approval)) return;
     if (!receipt || body.offer !== receipt.offer || grant.cert_sha256 !== receipt.cert ||
         !isDeepStrictEqual(grant.device, this.device) || !isDeepStrictEqual(grant.workload, receipt.workload) ||
         !isDeepStrictEqual(grant.scope, receipt.scope)) throw new Error('Grant does not match local consent.');
     const expiry = Math.min(body.expires_at_ms, receipt.until);
     if (expiry <= Date.now()) throw new Error('Local consent expired.');
     const cert = (await this.native.listIdentities()).find(c => c.certSha256 === receipt.cert);
-    if (!cert || !current()) return;
+    if (!cert || !current() || this.blockedApprovals.has(body.approval)) return;
     await this.native.activateScope(JSON.stringify({ ...body, expires_at_ms: expiry }), cert.selection);
-    if (!current()) { await this.native.retireScope(JSON.stringify(grant)); return; }
+    if (!current() || this.blockedApprovals.has(body.approval)) { await this.native.retireScope(JSON.stringify(grant)); return; }
     this.active.set(grant.grant, grant);
+    this.activations.set(grant.grant, body.approval);
+    this.emit('changed');
     this.send('activated', body, id);
   }
 
+  sendRevocation(approval) {
+    if (!this.device || [...this.revokeRequests.values()].includes(approval)) return;
+    const request = this.send('revoke_approval', { id: approval });
+    this.revokeRequests.set(request, approval);
+  }
+
+  async revoke(approval) {
+    if (!this.record.receipts?.[approval]) throw new Error('Unknown approval.');
+    this.blockedApprovals.add(approval);
+    for (const [id, activeApproval] of this.activations) {
+      if (activeApproval !== approval) continue;
+      const grant = this.active.get(id);
+      this.active.delete(id);
+      this.activations.delete(id);
+      this.native.retireScope(JSON.stringify(grant));
+    }
+    await this.store.update(this.record.id, record => {
+      const receipt = record.receipts[approval];
+      if (!receipt || receipt.revocation === 'recorded') return record;
+      return { ...record, receipts: { ...record.receipts, [approval]: { ...receipt, revocation: 'pending' } } };
+    });
+    this.record = this.store.get(this.record.id);
+    if (this.record.receipts[approval]?.revocation === 'pending') this.sendRevocation(approval);
+    this.updateReminders();
+    this.emit('changed');
+  }
+
+  updateReminders() {
+    clearTimeout(this.warningTimer);
+    const now = Date.now();
+    let next = Infinity;
+    for (const [id, receipt] of Object.entries(this.record.receipts ?? {})) {
+      if (receipt.revocation || receipt.until <= now) continue;
+      next = Math.min(next, receipt.until);
+      if (!receipt.issued || receipt.until - receipt.issued <= 300000 || this.warned.has(id)) continue;
+      const warnAt = receipt.until - 300000;
+      if (warnAt > now) next = Math.min(next, warnAt);
+      else {
+        this.warned.add(id);
+        this.emit('expiring', id);
+      }
+    }
+    if (Number.isFinite(next)) this.warningTimer = setTimeout(() => {
+      this.updateReminders();
+      this.emit('changed');
+    }, Math.min(2147483647, Math.max(1, next - now)));
+  }
+
   stop() {
+    clearTimeout(this.warningTimer);
     this.closed = true;
     clearTimeout(this.timer);
     this.socket?.terminate();

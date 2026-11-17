@@ -129,3 +129,38 @@ CREATE TABLE IF NOT EXISTS credential_use (
     observed_at_ms INTEGER NOT NULL,
     PRIMARY KEY(integrator,owner,fingerprint,pairing)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS deployment (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    integrator TEXT NOT NULL, verified_origin TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS issuer_stop (
+    integrator TEXT PRIMARY KEY NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS enforcer_issue (
+    grant_id TEXT NOT NULL REFERENCES approved_grant(id) ON DELETE CASCADE,
+    enforcer TEXT NOT NULL CHECK(enforcer IN ('ingress','egress')), instance TEXT NOT NULL,
+    gateway_boot TEXT NOT NULL, grant_binding TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+    PRIMARY KEY(grant_id,enforcer,instance)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS gateway_observation (
+    grant_id TEXT NOT NULL REFERENCES approved_grant(id) ON DELETE CASCADE,
+    enforcer TEXT NOT NULL, instance TEXT NOT NULL, observation TEXT NOT NULL,
+    host TEXT NOT NULL, tls_connection TEXT NOT NULL, received_at_ms INTEGER NOT NULL,
+    PRIMARY KEY(grant_id,enforcer,instance,observation)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS working_identity (
+    approval TEXT PRIMARY KEY REFERENCES approval(id) ON DELETE CASCADE,
+    grant_id TEXT NOT NULL UNIQUE REFERENCES approved_grant(id) ON DELETE CASCADE,
+    activation TEXT NOT NULL, public_chain TEXT NOT NULL,
+    verified_at_ms INTEGER NOT NULL, valid_until_ms INTEGER NOT NULL
+) STRICT;
+CREATE TRIGGER IF NOT EXISTS drop_ended_identity AFTER UPDATE OF state ON approval
+WHEN NEW.state <> 'approved'
+BEGIN
+    DELETE FROM working_identity WHERE approval=NEW.id;
+END;

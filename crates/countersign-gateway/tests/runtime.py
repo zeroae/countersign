@@ -13,6 +13,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import ssl
 import subprocess
@@ -69,6 +70,19 @@ class Fixture(http.server.ThreadingHTTPServer):
 class Site(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         fingerprint = hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest().encode()
+        if self.path == '/slow':
+            self.send_response(200)
+            self.send_header('content-length', '1000000')
+            self.end_headers()
+            self.wfile.write(b'x')
+            self.server.slow_started.set()
+            self.connection.settimeout(6)
+            try:
+                if not self.connection.recv(1):
+                    self.server.cutoff.set()
+            except (ConnectionResetError, ssl.SSLEOFError):
+                self.server.cutoff.set()
+            return
         self.send_response(200)
         self.send_header('content-length', str(len(fingerprint)))
         self.end_headers()
@@ -98,6 +112,16 @@ class Broker(http.server.BaseHTTPRequestHandler):
             value = {'activation': {'grant': grant, 'offer': user, 'approval': user,
                                      'expires_at_ms': authority.expires_at},
                      'chain': [authority.public[user]]}
+        elif msg == 'watch' and body == grant:
+            retired = authority.retired[user].wait(5)
+            kind, value = ('retire' if retired else 'no_change'), grant
+        elif msg == 'observed' and body['grant'] == grant and body['host'] == authority.host:
+            kind = 'observed'
+            value = body
+            with authority.observation_change:
+                received = authority.observations.setdefault((user,body['tls_connection']),set())
+                received.add(body['observation'])
+                authority.observation_change.notify_all()
         elif msg == 'renew_lease' and body['grant'] == grant:
             kind = 'lease'
             budget = 2000 if user == 'alice' else 30000
@@ -139,7 +163,10 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
     host = f'site.test:{site.server_port}'
     broker.host = host
     broker.accounts = {}
+    broker.retired = {user: threading.Event() for user in identities}
     broker.public = {}
+    broker.observations = {}
+    broker.observation_change = threading.Condition()
     broker.shared = shared
     broker.service_secret = 'secret-' * 8
     broker.expires_at = int(time.time()*1000) + 90000
@@ -189,12 +216,12 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
                     threading.Event().wait(.05)
             else:
                 raise RuntimeError('Gateway did not start')
-            def request(user,extra=()):
+            def request(user,extra=(),path='/'):
                 args=['curl','--silent','--show-error','--fail','--max-time','8','--noproxy','','--proxy',proxy,
                       '--proxy-cacert',str(dir/'ca.pem'),'--cacert',str(pub)]
                 if shared:
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
-                return subprocess.run(args + list(extra) + ['https://'+host+'/'], capture_output=True, timeout=10)
+                return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=10)
             users = ['alice','bob'] if shared else ['alice']
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(request,users))
@@ -202,8 +229,50 @@ def do_test(dir, binary, ip,site, broker, identities, shared):
                 assert res.returncode==0,(user,res.stderr)
                 expected=identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
                 assert res.stdout==expected,(user,res.stdout)
+            expected_events = {'mtls_accepted','ingress_closed','egress_closed'}
+            with broker.observation_change:
+                for user in users:
+                    assert broker.observation_change.wait_for(
+                        lambda: any(owner == user and events == expected_events
+                                    for (owner, _), events in broker.observations.items()), timeout=4
+                    ), (user, broker.observations)
             res=request(users[0],['-H','Host: forbidden.test'])
             assert res.returncode!=0, res.stdout
+            site.cutoff = threading.Event()
+            site.slow_started = threading.Event()
+            begin = time.monotonic()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(request,'alice',(),'/slow')
+                assert site.slow_started.wait(4), 'TLS connection did not reach site'
+                if not shared:
+                    # The only grant belongs to Alice. Stop all of this launcher's
+                    # descendants, including the worker. Both network relays must
+                    # still enforce cutoff, without help from any child process.
+                    def descendants(pid):
+                        child_list = Path(f'/proc/{pid}/task/{pid}/children')
+                        direct = [int(c) for c in child_list.read_text().split()]
+                        return direct + [p for c in direct for p in descendants(c)]
+                    workers = descendants(child.pid)
+                    assert workers, 'isolated worker missing'
+                    for pid in workers:
+                        os.kill(pid,signal.SIGSTOP)
+                alice = future.result(timeout=6)
+            assert alice.returncode != 0 and len(alice.stdout) < 2, (alice.returncode, alice.stdout)
+            assert site.cutoff.wait(1), 'upstream leg survived cutoff'
+            assert time.monotonic() - begin < 4, 'cutoff exceeded lease and test scheduling budget'
+            assert request('alice').returncode != 0, 'Lapsed worker reused old grant'
+            if shared:
+                assert request('bob').returncode == 0, 'Alice cutoff affected Bob'
+                # Bob's 30s authority remains valid on both legs. A retirement
+                # notification accelerates cutoff without waiting for renewal.
+                site.cutoff = threading.Event()
+                site.slow_started = threading.Event()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(request,'bob',(),'/slow')
+                    assert site.slow_started.wait(4)
+                    broker.retired['bob'].set()
+                    assert future.result(timeout=4).returncode != 0
+                    assert site.cutoff.wait(1)
         finally:
             child.terminate()
             child.wait(timeout=6)

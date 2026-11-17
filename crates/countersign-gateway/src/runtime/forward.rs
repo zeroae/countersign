@@ -17,6 +17,27 @@ use tokio::sync::Mutex;
 
 type Body = UnsyncBoxBody<Bytes, hyper::Error>;
 
+struct CountedResponse {
+    body: Incoming,
+    _permit: super::worker::StreamPermit,
+}
+impl hyper::body::Body for CountedResponse {
+    type Data = Bytes;
+    type Error = hyper::Error;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<std::result::Result<hyper::body::Frame<Bytes>, hyper::Error>>> {
+        std::pin::Pin::new(&mut self.body).poll_frame(cx)
+    }
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.body.size_hint()
+    }
+}
+
 enum Sender {
     H1(Mutex<http1::SendRequest<Incoming>>),
     H2(http2::SendRequest<Incoming>),
@@ -89,13 +110,40 @@ fn error(status: StatusCode) -> Response<Body> {
     resp
 }
 
-async fn request(req: Request<Incoming>, origin: &Origin, sender: &Sender) -> Response<Body> {
+async fn request(
+    req: Request<Incoming>,
+    origin: &Origin,
+    sender: &Sender,
+    limits: &Arc<super::worker::StreamLimits>,
+) -> Response<Body> {
     if forbidden(&req, origin) {
         return error(StatusCode::FORBIDDEN);
     }
+    let permit = match limits.acquire() {
+        Ok(Some(permit)) => permit,
+        Ok(None) => return error(StatusCode::TOO_MANY_REQUESTS),
+        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE),
+    };
     let mut req = req;
     if strip(req.headers_mut()).is_err() {
         return error(StatusCode::BAD_REQUEST);
+    }
+    let untrusted_identity: Vec<_> = req
+        .headers()
+        .keys()
+        .filter(|name| {
+            let name = name.as_str();
+            name.starts_with("countersign-")
+                || name.starts_with("x-countersign-")
+                || matches!(
+                    name,
+                    "x-forwarded-client-cert" | "x-ssl-client-cert" | "x-ssl-client-verify"
+                )
+        })
+        .cloned()
+        .collect();
+    for name in untrusted_identity {
+        req.headers_mut().remove(name);
     }
     let authority = origin.to_string();
     req.headers_mut().remove(header::HOST);
@@ -105,7 +153,7 @@ async fn request(req: Request<Incoming>, origin: &Origin, sender: &Sender) -> Re
         .map(|p| p.as_str())
         .unwrap_or("/")
         .to_owned();
-    if !path.starts_with('/') {
+    if !path.starts_with('/') || path.starts_with("//") {
         return error(StatusCode::BAD_REQUEST);
     }
     // Set each hop's request-target independently of how the peer spelled it.
@@ -149,7 +197,14 @@ async fn request(req: Request<Incoming>, origin: &Origin, sender: &Sender) -> Re
             if strip(response.headers_mut()).is_err() {
                 return error(StatusCode::BAD_GATEWAY);
             }
-            response.map(|b| b.boxed_unsync())
+            limits.observed_response();
+            response.map(|body| {
+                CountedResponse {
+                    body,
+                    _permit: permit,
+                }
+                .boxed_unsync()
+            })
         }
         _ => error(StatusCode::BAD_GATEWAY),
     }
@@ -161,6 +216,7 @@ pub async fn http<D, U>(
     upstream: U,
     up_h2: bool,
     origin: Origin,
+    limits: Arc<super::worker::StreamLimits>,
 ) -> Result<()>
 where
     D: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -168,6 +224,7 @@ where
 {
     let (sender, driver) = if up_h2 {
         let (sender, conn) = http2::Builder::new(TokioExecutor::new())
+            .max_header_list_size(16384)
             .initial_stream_window_size(16384)
             .initial_connection_window_size(65535)
             .max_send_buf_size(16384)
@@ -185,7 +242,8 @@ where
     let service = service_fn(move |req| {
         let sender = sender.clone();
         let origin = origin.clone();
-        async move { Ok::<_, Infallible>(request(req, &origin, &sender).await) }
+        let limits = limits.clone();
+        async move { Ok::<_, Infallible>(request(req, &origin, &sender, &limits).await) }
     });
     let result = if down_h2 {
         hyper::server::conn::http2::Builder::new(TokioExecutor::new())

@@ -6,7 +6,9 @@ use webpki::EndEntityCert;
 use x509_ocsp::{BasicOcspResponse, CertStatus, OcspResponse, OcspResponseStatus, ResponderId};
 use x509_parser::certificate::X509Certificate;
 
-pub(super) fn validate(
+/// Verify imported OCSP status for each non-anchor certificate in a chain
+/// already authenticated for its application role. Returns the earliest expiry.
+pub fn validate_ocsp(
     ders: &[CertificateDer<'_>],
     roots: &[CertificateDer<'_>],
     files: &[PathBuf],
@@ -15,6 +17,15 @@ pub(super) fn validate(
 ) -> Result<i64> {
     // This import profile accepts an ordered chain. Verify the issuer
     // relationship for each link independently of webpki's path selection.
+    if now < 0
+        || ders.is_empty()
+        || roots.is_empty()
+        || files.is_empty()
+        || files.len() > 32
+        || roots.iter().any(|r| r.as_ref() == ders[0].as_ref())
+    {
+        return Err(Invalid::Evidence);
+    }
     let mut responses = Vec::new();
     for path in files {
         let outer = OcspResponse::from_der(&read_import(path)?).map_err(|_| Invalid::Evidence)?;

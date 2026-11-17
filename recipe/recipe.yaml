@@ -11,6 +11,9 @@ source:
 
 build:
   number: 0
+  dynamic_linking:
+    binary_relocation:
+      - lib/countersign-companion/resources/app.asar.unpacked/native/countersign-native.node
   skip:
     - win or osx
 

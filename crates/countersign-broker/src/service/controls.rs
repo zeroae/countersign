@@ -20,6 +20,9 @@ pub(super) enum Control {
         entry: w::Id,
         denied: bool,
     },
+    Issuer {
+        stopped: bool,
+    },
     Emergency {
         stopped: bool,
     },
@@ -31,6 +34,7 @@ struct Filter<'a> {
     context: Option<&'a str>,
     entry: Option<&'a str>,
     pairing: Option<&'a str>,
+    workload: Option<(&'a str, i64)>,
 }
 
 fn retire(
@@ -39,8 +43,9 @@ fn retire(
     filter: Filter<'_>,
     kind: &str,
 ) -> Result<Vec<String>> {
-    let mut query=tx.prepare("SELECT a.id FROM approval a WHERE integrator=?1 AND current=1 AND state IN ('pending','approved')
+    let mut query=tx.prepare("SELECT a.id FROM approval a WHERE integrator=?1 AND state IN ('pending','approved')
         AND (?2 IS NULL OR owner=?2) AND (?3 IS NULL OR context=?3) AND (?4 IS NULL OR entry_id=?4)
+        AND (?6 IS NULL OR (workload=?6 AND workload_generation=?7))
         AND (?5 IS NULL OR EXISTS(SELECT 1 FROM approved_grant g JOIN offer o ON o.id=g.offer WHERE g.approval=a.id AND o.pairing=?5))")?;
     let affected = query
         .query_map(
@@ -49,7 +54,9 @@ fn retire(
                 filter.user,
                 filter.context,
                 filter.entry,
-                filter.pairing
+                filter.pairing,
+                filter.workload.map(|w| w.0),
+                filter.workload.map(|w| w.1)
             ],
             |r| r.get::<_, String>(0),
         )?
@@ -68,6 +75,12 @@ fn retire(
     }
     Ok(affected)
 }
+pub(super) fn withdraw(a: &mut Authority, owner: &Owner, affected: Vec<Uuid>) {
+    clear_live(a, &affected.iter().map(Uuid::to_string).collect::<Vec<_>>());
+    for id in affected {
+        a.notify(&owner.user, wire_id(id));
+    }
+}
 pub(super) fn clear_live(a: &mut Authority, affected: &[String]) {
     let ids: std::collections::HashSet<_> = affected.iter().map(String::as_str).collect();
     a.grants.retain(|_, g| {
@@ -85,6 +98,50 @@ pub(super) fn clear_live(a: &mut Authority, affected: &[String]) {
     });
     a.waiting
         .retain(|_, v| a.grants.contains_key(v.op.grant.grant.as_str()));
+}
+pub(super) fn retire_generation(
+    tx: &rusqlite::Transaction<'_>,
+    binding: &w::WorkloadBinding,
+    generation: i64,
+) -> Result<Vec<String>> {
+    retire(
+        tx,
+        binding.integrator.as_str(),
+        Filter {
+            user: Some(binding.user.as_str()),
+            context: Some(binding.context.as_str()),
+            workload: Some((binding.workload.as_str(), generation)),
+            ..Default::default()
+        },
+        "workload_retired",
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetireWorkload {
+    binding: w::WorkloadBinding,
+}
+
+pub(super) async fn retire_workload(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Json(req): Json<RetireWorkload>,
+) -> Result<StatusCode> {
+    backend::auth(&s, &h)?;
+    s.apply(move |a| {
+        let b=req.binding;
+        if b.integrator!=a.integrator { return Err(Fault::Denied); }
+        let generation=i64::try_from(b.workload_generation.get()).map_err(|_|Fault::Invalid)?;
+        let tx=a.store.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let n=tx.execute("UPDATE workload_binding SET retired=1 WHERE integrator=?1 AND owner=?2 AND context=?3 AND instance=?4 AND generation=?5",
+            params![b.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str(),generation])?;
+        if n!=1 { return Err(Fault::Unavailable); }
+        let ids=retire_generation(&tx, &b, generation)?;
+        tx.commit()?;
+        clear_live(a,&ids);
+        Ok(StatusCode::NO_CONTENT)
+    }).await
 }
 pub(super) async fn close_context(
     State(s): State<Service>,
@@ -132,35 +189,57 @@ pub(super) async fn admin(
     {
         return Err(Fault::Unauthenticated);
     }
-    s.apply(move|a|{
-        let tx=a.store.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let integrator=a.integrator.as_str();
-        let (filter,kind)=match &control {
-            Control::Account{user,blocked}=>{
-                let sql=if *blocked {"INSERT OR IGNORE INTO suspended_user VALUES(?1,?2)"}else{"DELETE FROM suspended_user WHERE integrator=?1 AND owner=?2"};
-                tx.execute(sql,params![integrator,user.as_str()])?;
-                (blocked.then_some(Filter{user:Some(user.as_str()),..Default::default()}),"account_control")
+    s.apply(move |a| {
+        if let Control::Destination {entry,..} = &control
+            && !a.policy.entries().iter().any(|e|e.id()==entry.as_str()) {
+            return Err(Fault::Invalid);
+        }
+        let tx = a.store.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let integrator = a.integrator.as_str();
+        let (filter, kind) = match &control {
+            Control::Account { user, blocked } => {
+                let args = params![integrator, user.as_str()];
+                if *blocked {
+                    tx.execute("INSERT OR IGNORE INTO suspended_user VALUES(?1,?2)",args)?;
+                } else {
+                    tx.execute("DELETE FROM suspended_user WHERE integrator=?1 AND owner=?2",args)?;
+                }
+                (Filter {user:Some(user.as_str()),..Default::default()},if *blocked{"account_blocked"}else{"account_enabled"})
             }
-            Control::Destination{user,entry,denied}=>{
-                if !a.policy.entries().iter().any(|e|e.id()==entry.as_str()){return Err(Fault::Invalid);}
-                let sql=if *denied {"INSERT OR IGNORE INTO denied_destination VALUES (?1,?2,?3)"}else{"DELETE FROM denied_destination WHERE integrator=?1 AND owner=?2 AND entry_id=?3"};
-                tx.execute(sql,params![integrator,user.as_str(),entry.as_str()])?;
-                (denied.then_some(Filter{user:Some(user.as_str()),entry:Some(entry.as_str()),..Default::default()}),"destination_control")
+            Control::Destination { user, entry, denied } => {
+                let args = params![integrator,user.as_str(),entry.as_str()];
+                if *denied {
+                    tx.execute("INSERT OR IGNORE INTO denied_destination VALUES(?1,?2,?3)",args)?;
+                } else {
+                    tx.execute("DELETE FROM denied_destination WHERE integrator=?1 AND owner=?2 AND entry_id=?3",args)?;
+                }
+                (Filter{user:Some(user.as_str()),entry:Some(entry.as_str()),..Default::default()}, if *denied{"destination_denied"}else{"destination_permitted"})
             }
-            Control::Emergency{stopped}=>{
-                let sql=if *stopped {"INSERT OR IGNORE INTO emergency_stop VALUES (?1)"}else{"DELETE FROM emergency_stop WHERE integrator=?1"};
-                tx.execute(sql,[integrator])?;
-                (stopped.then_some(Filter::default()),"emergency_control")
+            Control::Issuer { stopped } => {
+                if *stopped {
+                    tx.execute("INSERT OR IGNORE INTO issuer_stop VALUES(?1)", [integrator])?;
+                } else {
+                    tx.execute("DELETE FROM issuer_stop WHERE integrator=?1", [integrator])?;
+                }
+                (Filter::default(),if *stopped{"issuer_stopped"}else{"issuer_enabled"})
             }
-        };
-        let affected=match filter {Some(f)=>retire(&tx,integrator,f,kind)?,None=>Vec::new()};
-        let (user,target,operation)=match &control {
-            Control::Account{user,blocked}=>(Some(user.as_str()),None,if *blocked{"account_blocked"}else{"account_enabled"}),
-            Control::Destination{user,entry,denied}=>(Some(user.as_str()),Some(entry.as_str()),if *denied{"destination_denied"}else{"destination_permitted"}),
-            Control::Emergency{stopped}=>(None,None,if *stopped{"emergency_stop"}else{"emergency_cleared"}),
+            Control::Emergency { stopped } => {
+                if *stopped {
+                    tx.execute("INSERT OR IGNORE INTO emergency_stop VALUES(?1)",[integrator])?;
+                } else {
+                    tx.execute("DELETE FROM emergency_stop WHERE integrator=?1",[integrator])?;
+                }
+                (Filter::default(),if *stopped{"emergency_stop"}else{"emergency_cleared"})
+            }
         };
         tx.execute("INSERT INTO security_event(id,integrator,owner,kind,actor,target,occurred_at_ms) VALUES(?1,?2,?3,?4,'admin',?5,?6)",
-            params![Uuid::new_v4().to_string(),integrator,user,operation,target,clock_ms()? as i64])?;
+            params![Uuid::new_v4().to_string(),integrator,filter.user,kind,filter.entry,clock_ms()? as i64])?;
+        let withdraw = match control {
+            Control::Account{blocked, ..} => blocked,
+            Control::Destination{denied,..} => denied,
+            Control::Issuer{stopped}|Control::Emergency{stopped} => stopped,
+        };
+        let affected = if withdraw { retire(&tx, integrator,filter,kind)? } else { Vec::new() };
         tx.commit()?;
         clear_live(a,&affected);
         Ok(StatusCode::NO_CONTENT)
@@ -340,40 +419,51 @@ fn persist_notice(
          e.occurred_at_ms as i64])?;
     Ok(())
 }
-pub(super) fn connected(
-    a: &mut Authority,
-    user: &str,
+pub(super) fn record_connection(
+    tx: &rusqlite::Transaction<'_>,
+    owner: &Owner,
     device: &w::DeviceBinding,
     address: Option<String>,
-) -> Result<()> {
-    let now = clock_ms()?;
-    a.store.connection.execute("INSERT INTO presence(pairing,connected_at,address) VALUES(?1,?2,?3)
+    others: Vec<w::DeviceBinding>,
+    paired: bool,
+    at: u64,
+) -> Result<Option<w::Id>> {
+    tx.execute(
+        "INSERT INTO presence(pairing,connected_at,address) VALUES(?1,?2,?3)
          ON CONFLICT(pairing) DO UPDATE SET connected_at=excluded.connected_at,address=excluded.address",
-         params![device.pairing.as_str(),now as i64,address])?;
-    let others: Vec<_> = a
-        .peers
-        .values()
-        .filter(|p| p.session.owner.user == user && p.binding.pairing != device.pairing)
-        .map(|p| p.binding.clone())
-        .collect();
-    if !others.is_empty() {
-        let id = fresh();
-        persist_notice(
-            &a.store.connection,
-            a.integrator.as_str(),
-            user,
-            &w::SecurityEvent {
-                id: id.clone(),
-                kind: "concurrent_devices".into(),
-                actor: Some(device.clone()),
-                targets: others,
-                occurred_at_ms: now,
-                observed_address: address,
-            },
-        )?;
-        a.notify(user, id);
+        params![device.pairing.as_str(), at as i64, address],
+    )?;
+    persist_notice(
+        tx,
+        &owner.integrator,
+        &owner.user,
+        &w::SecurityEvent {
+            id: fresh(),
+            kind: if paired { "paired" } else { "reconnected" }.into(),
+            actor: Some(device.clone()),
+            targets: Vec::new(),
+            occurred_at_ms: at,
+            observed_address: address.clone(),
+        },
+    )?;
+    if others.is_empty() {
+        return Ok(None);
     }
-    Ok(())
+    let id = fresh();
+    persist_notice(
+        tx,
+        &owner.integrator,
+        &owner.user,
+        &w::SecurityEvent {
+            id: id.clone(),
+            kind: "concurrent_devices".into(),
+            actor: Some(device.clone()),
+            targets: others,
+            occurred_at_ms: at,
+            observed_address: address,
+        },
+    )?;
+    Ok(Some(id))
 }
 pub(super) fn fetch_event(
     a: &Authority,

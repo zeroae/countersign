@@ -286,6 +286,58 @@ async fn authenticated_consent_signing_reconnect_and_revocation() {
             <= 30_000
     );
     assert_eq!(h.post("gateway/lease", token, lease(1)).await.status(), 403);
+    let swapped = h
+        .client
+        .post(format!("http://{}/v1/gateway/lease", h.addr))
+        .header("x-countersign-gateway-instance", Uuid::new_v4().to_string())
+        .bearer_auth(token)
+        .json(&lease(3))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(swapped.status(), 403);
+    let observe = |event: &str, instance: &str| {
+        frame(
+            "observed",
+            json!({
+                "grant":grant,"host":"upstream.test:443","enforcer_instance":instance,"tls_connection":"socket-1","observation":event
+            }),
+        )
+    };
+    assert_eq!(
+        h.post(
+            "gateway/observe",
+            token,
+            observe("mtls_accepted", "gateway")
+        )
+        .await
+        .status(),
+        403
+    );
+    let mut egress = lease(1);
+    egress["body"]["enforcer"] = "egress".into();
+    egress["body"]["instance"] = "site-leg".into();
+    assert_eq!(h.post("gateway/lease", token, egress).await.status(), 200);
+    assert_eq!(
+        h.post(
+            "gateway/observe",
+            token,
+            observe("mtls_accepted", "site-leg")
+        )
+        .await
+        .status(),
+        200
+    );
+    let status_req = json!({"user":"u","id":offered["binding"]["approval"]});
+    let view: Value = h
+        .post("backend/status", BACKEND, status_req.clone())
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["ready"], true);
+    assert_eq!(view["upstream_mtls_accepted"], true);
+    assert_eq!(view["egress_closed_count"], 0);
     let mut data = vec![0x20u8; 64];
     data.extend_from_slice(b"TLS 1.3, client CertificateVerify\0");
     data.extend_from_slice(&[5u8; 32]);
@@ -326,16 +378,73 @@ async fn authenticated_consent_signing_reconnect_and_revocation() {
     );
     let snapshot = receive(&mut second, "activate").await;
     assert_eq!(snapshot["body"]["grant"]["grant"], grant["grant"]);
-    assert_eq!(
-        h.post(
-            "backend/revoke",
-            BACKEND,
-            json!({"user":"u","id":offered["binding"]["approval"]})
-        )
-        .await
-        .status(),
-        204
+    send(&mut second, frame("activated", snapshot["body"].clone())).await;
+    send(&mut second, frame("inbox", json!({}))).await;
+    receive(&mut second, "inbox").await;
+    let op = json!({"grant":snapshot["body"]["grant"],"host":"upstream.test:443","tls_connection":"socket-2","operation":"op-2"});
+    let request = frame(
+        "sign",
+        json!({"binding":op,"tls":"tls13","scheme":"ecdsa_nistp256_sha256",
+        "certificate_verify":STANDARD.encode(&data),"deadline_ms":millis()+10000}),
     );
+    let pending_sign = h.post("gateway/sign", token, request);
+    let withdraw = async {
+        let asked = receive(&mut second, "sign").await;
+        assert_eq!(
+            h.post(
+                "backend/revoke",
+                BACKEND,
+                json!({"user":"u","id":offered["binding"]["approval"]})
+            )
+            .await
+            .status(),
+            204
+        );
+        receive(&mut second, "retire").await;
+        let sig = h.key.sign(&SystemRandom::new(), &data).unwrap();
+        let mut late = frame(
+            "signed",
+            json!({"binding":op,"signature":STANDARD.encode(sig.as_ref())}),
+        );
+        late["request_id"] = asked["request_id"].clone();
+        send(&mut second, late).await;
+        assert_eq!(
+            receive(&mut second, "error").await["body"]["code"],
+            "unavailable"
+        );
+    };
+    let (refused, _) = tokio::join!(pending_sign, withdraw);
+    assert!(!refused.status().is_success());
+    let n = json!({"id":offered["binding"]["approval"]});
+    send(&mut second, frame("revoke_approval", n.clone())).await;
+    assert_eq!(receive(&mut second, "revoke_recorded").await["body"], n);
+    let (mut other, _) = pair(&h, "u").await;
+    send(&mut other, frame("revoke_approval", n)).await;
+    assert_eq!(
+        receive(&mut other, "error").await["body"]["code"],
+        "unavailable"
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            h.post(
+                "gateway/observe",
+                token,
+                observe("egress_closed", "site-leg")
+            )
+            .await
+            .status(),
+            200
+        );
+    }
+    let ended: Value = h
+        .post("backend/status", BACKEND, status_req)
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ended["state"], "cancelled");
+    assert_eq!(ended["ready"], false);
+    assert_eq!(ended["egress_closed_count"], 1);
     assert!(
         !h.post("gateway/lease", token, lease(3))
             .await
@@ -457,6 +566,7 @@ async fn admin_authority_and_context_tombstones_gate_workload_admission() {
         json!({"operation":"destination","user":"u","entry":"test","denied":true}),
         json!({"operation":"account","user":"u","blocked":true}),
         json!({"operation":"emergency","stopped":true}),
+        json!({"operation":"issuer","stopped":true}),
     ] {
         assert_eq!(
             h.post("admin/control", BACKEND, op.clone()).await.status(),

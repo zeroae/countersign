@@ -29,12 +29,14 @@ pub trait SigningRelay: Send + Sync {
         &self,
         version: rustls::ProtocolVersion,
         scheme: SignatureScheme,
+        peer_chain: &[CertificateDer<'static>],
         input: &[u8],
     ) -> Result<Vec<u8>, Error>;
 }
 
 struct VerifiedPeer {
     verifier: Arc<WebPkiServerVerifier>,
+    chain: Arc<OnceLock<Vec<CertificateDer<'static>>>>,
     version: Arc<OnceLock<rustls::ProtocolVersion>>,
 }
 
@@ -53,8 +55,31 @@ impl ServerCertVerifier for VerifiedPeer {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        self.verifier
-            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        let proof = self.verifier.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        )?;
+        if intermediates.len() >= 16
+            || intermediates
+                .iter()
+                .map(|c| c.len())
+                .sum::<usize>()
+                .saturating_add(end_entity.len())
+                > 256 * 1024
+        {
+            return Err(tls_error("upstream certificate chain exceeds the limit"));
+        }
+        let chain = std::iter::once(end_entity)
+            .chain(intermediates)
+            .map(|c| c.clone().into_owned())
+            .collect();
+        self.chain
+            .set(chain)
+            .map_err(|_| tls_error("repeated upstream certificate chain"))?;
+        Ok(proof)
     }
 
     fn verify_tls12_signature(
@@ -90,6 +115,7 @@ impl ServerCertVerifier for VerifiedPeer {
 
 struct ConnectionKey {
     relay: Arc<dyn SigningRelay>,
+    chain: Arc<OnceLock<Vec<CertificateDer<'static>>>>,
     peer: Arc<OnceLock<rustls::ProtocolVersion>>,
     allowed: &'static [SignatureScheme],
     algorithm: SignatureAlgorithm,
@@ -141,7 +167,11 @@ impl Signer for RemoteSigner {
         if key.consumed.swap(true, Ordering::AcqRel) {
             return Err(tls_error("operation already consumed"));
         }
-        let signature = key.relay.sign(*version, self.scheme, input)?;
+        let peer_chain = key
+            .chain
+            .get()
+            .ok_or_else(|| tls_error("missing upstream certificate chain"))?;
+        let signature = key.relay.sign(*version, self.scheme, peer_chain, input)?;
         let algorithm: &dyn VerificationAlgorithm = match self.scheme {
             SignatureScheme::ECDSA_NISTP256_SHA256 => &signature::ECDSA_P256_SHA256_ASN1,
             SignatureScheme::ECDSA_NISTP384_SHA384 => &signature::ECDSA_P384_SHA384_ASN1,
@@ -226,9 +256,11 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
         _ => return Err(invalid("unsupported client identity")),
     };
     let version = Arc::new(OnceLock::new());
+    let server_chain = Arc::new(OnceLock::new());
     let key = Arc::new(ConnectionKey {
         relay,
         peer: version.clone(),
+        chain: server_chain.clone(),
         allowed,
         algorithm,
         key: pk.subject_public_key.data.to_vec(),
@@ -240,7 +272,11 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
         .with_safe_default_protocol_versions()
         .map_err(IoError::other)?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(VerifiedPeer { verifier, version }))
+        .with_custom_certificate_verifier(Arc::new(VerifiedPeer {
+            verifier,
+            version,
+            chain: server_chain,
+        }))
         .with_client_cert_resolver(Arc::new(SingleCertAndKey::from(client_auth)));
     config.resumption = Resumption::disabled();
     config.enable_early_data = false;

@@ -1,44 +1,23 @@
 //! Inputs are the selected public chain, administrator-installed anchors and
 //! bounded local imports of signed status objects. No certificate URL is used.
-use countersign_protocol::wire::{Fingerprint, PublicChain};
+pub(crate) use countersign_pki::Invalid;
+use countersign_pki::{Result, Revocation, read_import};
+use countersign_protocol::wire::{
+    DistinguishedName, Fingerprint, IdentityHints, PublicChain, SignatureScheme,
+};
 use rustls::{
     RootCertStore,
-    pki_types::{CertificateDer, CertificateRevocationListDer, UnixTime, pem::PemObject},
+    pki_types::{CertificateDer, UnixTime, pem::PemObject},
     server::WebPkiClientVerifier,
 };
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
-    fs::File,
-    io::Read,
-    num::NonZeroU32,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-use x509_parser::prelude::{parse_x509_certificate, parse_x509_crl};
-mod ocsp;
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub(crate) enum Invalid {
-    #[error("invalid certificate chain, trust profile or status evidence")]
-    Evidence,
-    #[error("certificate revoked")]
-    Revoked,
-}
-type Result<T> = std::result::Result<T, Invalid>;
-
-#[derive(Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum Revocation {
-    Crl {
-        files: Vec<PathBuf>,
-    },
-    Ocsp {
-        files: Vec<PathBuf>,
-        max_age_s: Option<NonZeroU32>,
-    },
-}
+use x509_parser::prelude::parse_x509_certificate;
 #[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Profile {
@@ -52,23 +31,11 @@ pub(crate) struct Validator {
     anchors: Vec<CertificateDer<'static>>,
     roots: Arc<RootCertStore>,
     profile: Profile,
+    issuers: Vec<DistinguishedName>,
 }
 pub(crate) struct Verdict {
     pub certificate_end: i64,
     pub evidence_end: i64,
-}
-fn read_import(path: &Path) -> Result<Vec<u8>> {
-    const MAX: u64 = 4 * 1024 * 1024;
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|_| Invalid::Evidence)?
-        .take(MAX + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| Invalid::Evidence)?;
-    if bytes.is_empty() || bytes.len() as u64 > MAX {
-        return Err(Invalid::Evidence);
-    }
-    Ok(bytes)
 }
 impl Validator {
     pub(crate) fn new(profile: Profile, default_ca: &Path) -> Result<Self> {
@@ -84,18 +51,52 @@ impl Validator {
         let anchors = CertificateDer::pem_slice_iter(&bytes)
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|_| Invalid::Evidence)?;
-        if anchors.is_empty() {
+        if anchors.is_empty()
+            || anchors.len() > 64
+            || profile
+                .user_fingerprints
+                .as_ref()
+                .is_some_and(|m| m.values().any(|v| v.len() > 256))
+        {
             return Err(Invalid::Evidence);
         }
         let mut roots = RootCertStore::empty();
+        let mut issuers = Vec::new();
         for anchor in &anchors {
+            let (_, ca) = parse_x509_certificate(anchor.as_ref()).map_err(|_| Invalid::Evidence)?;
+            issuers.push(
+                DistinguishedName::new(ca.subject().as_raw().to_owned())
+                    .map_err(|_| Invalid::Evidence)?,
+            );
             roots.add(anchor.clone()).map_err(|_| Invalid::Evidence)?;
         }
         Ok(Self {
             anchors,
+            issuers,
             roots: Arc::new(roots),
             profile,
         })
+    }
+    pub(crate) fn hints(&self, user: &str) -> IdentityHints {
+        use SignatureScheme::*;
+        IdentityHints {
+            issuer_names: self.issuers.clone(),
+            cert_fingerprints: self
+                .profile
+                .user_fingerprints
+                .as_ref()
+                .map(|m| m.get(user).cloned().unwrap_or_default()),
+            signature_schemes: vec![
+                EcdsaNistp256Sha256,
+                EcdsaNistp384Sha384,
+                RsaPssSha256,
+                RsaPssSha384,
+                RsaPssSha512,
+                RsaPkcs1Sha256,
+                RsaPkcs1Sha384,
+                RsaPkcs1Sha512,
+            ],
+        }
     }
     pub(crate) fn verify(&self, user: &str, chain: &PublicChain, at: u64) -> Result<Verdict> {
         let now = (at / 1000) as i64;
@@ -105,6 +106,39 @@ impl Validator {
             .map(|b| CertificateDer::from(b.as_slice()))
             .collect();
         let (leaf, rest) = ders.split_first().ok_or(Invalid::Evidence)?;
+        let (_, client) = parse_x509_certificate(leaf.as_ref()).map_err(|_| Invalid::Evidence)?;
+        if client.is_ca()
+            || client
+                .key_usage()
+                .map_err(|_| Invalid::Evidence)?
+                .is_some_and(|ku| !ku.value.digital_signature())
+        {
+            return Err(Invalid::Evidence);
+        }
+        use x509_parser::public_key::PublicKey;
+        let supported = match client
+            .public_key()
+            .parsed()
+            .map_err(|_| Invalid::Evidence)?
+        {
+            PublicKey::RSA(rsa) => (2048..=8192).contains(&rsa.key_size()),
+            PublicKey::EC(_) => client
+                .public_key()
+                .algorithm
+                .parameters
+                .as_ref()
+                .and_then(|p| p.as_oid().ok())
+                .is_some_and(|oid| {
+                    matches!(
+                        oid.to_id_string().as_str(),
+                        "1.2.840.10045.3.1.7" | "1.3.132.0.34"
+                    )
+                }),
+            _ => false,
+        };
+        if !supported {
+            return Err(Invalid::Evidence);
+        }
         let hash = crate::credentials::fingerprint(leaf.as_ref());
         if self.profile.user_fingerprints.as_ref().is_some_and(|m| {
             !m.get(user)
@@ -118,33 +152,8 @@ impl Validator {
             Arc::new(rustls::crypto::ring::default_provider()),
         );
         if let Some(Revocation::Crl { files }) = &self.profile.revocation {
-            let mut crls = Vec::new();
-            let mut issuers = std::collections::HashSet::new();
-            for file in files {
-                let bytes = read_import(file)?;
-                let (trailing, crl) = parse_x509_crl(&bytes).map_err(|_| Invalid::Evidence)?;
-                // Only one complete direct CRL per issuer is supported. An
-                // overlapping or partial CRL must never hide a revoked serial.
-                if !issuers.insert(crl.issuer().as_raw().to_vec())
-                    || crl
-                        .extensions()
-                        .iter()
-                        .any(|e| matches!(e.oid.to_string().as_str(), "2.5.29.27" | "2.5.29.28"))
-                    || crl.iter_revoked_certificates().any(|r| {
-                        r.extensions()
-                            .iter()
-                            .any(|e| e.oid.to_string() == "2.5.29.29")
-                    })
-                {
-                    return Err(Invalid::Evidence);
-                }
-                let expiry = crl.next_update().ok_or(Invalid::Evidence)?.timestamp();
-                if !trailing.is_empty() || crl.last_update().timestamp() > now || expiry <= now {
-                    return Err(Invalid::Evidence);
-                }
-                until = until.min(expiry);
-                crls.push(CertificateRevocationListDer::from(bytes));
-            }
+            let (crls, end) = countersign_pki::crls(files, now)?;
+            until = end;
             verifier = verifier.with_crls(crls).enforce_revocation_expiration();
         }
         let verifier = verifier.build().map_err(|_| Invalid::Evidence)?;
@@ -173,7 +182,7 @@ impl Validator {
             cert_end = cert_end.min(x.validity.not_after.timestamp());
         }
         if let Some(Revocation::Ocsp { files, max_age_s }) = &self.profile.revocation {
-            until = ocsp::validate(&ders, &self.anchors, files, *max_age_s, now)?;
+            until = countersign_pki::validate_ocsp(&ders, &self.anchors, files, *max_age_s, now)?;
         }
         Ok(Verdict {
             certificate_end: cert_end,

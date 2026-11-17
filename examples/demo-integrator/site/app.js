@@ -39,7 +39,10 @@ async function load(){
 byId('login').onsubmit=perform(async()=>{await post('login',{password:byId('login').elements.password.value});byId('login').reset();await load();});
 byId('pair').onsubmit=perform(async()=>{await post('pair',{attempt:new URL(location.href).searchParams.get('attempt'),code:byId('pair').elements.code.value});show('Confirm the account in Countersign.');byId('pair').hidden=true;});
 byId('forget').onclick=perform(async()=>{await post('forget',{targets:[target]});show('Pairing revoked.');});
-byId('status').onclick=perform(async()=>show((await post('status',{id:active})).state));
+byId('status').onclick=perform(async()=>{
+  const status=await post('status',{id:active});
+  show([status.state,status.ready && 'Companion ready',status.upstream_mtls_accepted && 'Upstream accepted mTLS'].filter(Boolean).join(' · '));
+});
 byId('renew').onclick=perform(async()=>select((await post('renew',{id:active})).id));
 byId('revoke').onclick=perform(async()=>{await post('revoke',{id:active});show('Revocation recorded.');});
 byId('logout').onclick=perform(async()=>{

@@ -6,6 +6,7 @@ use aws_sdk_acmpca::{
     primitives::Blob,
     types::{SigningAlgorithm, Validity, ValidityPeriodType},
 };
+use aws_smithy_json::protocol::aws_json_rpc::AwsJsonRpcProtocol;
 use countersign_protocol::{DestinationPolicy, DestinationScope, Origin};
 use rcgen::{Issuer, KeyPair, PublicKeyData};
 use rustls::{
@@ -107,7 +108,8 @@ impl SharedIssuer {
                     loader = loader.profile_name(name);
                 }
                 let config = loader.load().await;
-                let mut builder = aws_sdk_acmpca::config::Builder::from(&config);
+                let mut builder = aws_sdk_acmpca::config::Builder::from(&config)
+                    .protocol(AwsJsonRpcProtocol::aws_json_1_1());
                 if let Some(url) = endpoint {
                     if !url.starts_with("https://") {
                         return Err("expected HTTPS issuer endpoint".into());
@@ -272,9 +274,14 @@ impl SharedIssuer {
             || !ext.server_auth
             || ext.any
             || ext.client_auth
-            || !cert
-                .key_usage()?
-                .is_some_and(|k| k.value.digital_signature() && !k.value.key_cert_sign())
+            || ext.code_signing
+            || ext.email_protection
+            || ext.time_stamping
+            || ext.ocsp_signing
+            || !ext.other.is_empty()
+            || !cert.key_usage()?.is_some_and(|k| {
+                k.value.digital_signature() && !k.value.key_cert_sign() && !k.value.crl_sign()
+            })
             || names.general_names.len() != expected.len()
             || expected
                 .iter()
@@ -292,5 +299,245 @@ impl SharedIssuer {
             UnixTime::now(),
         )?;
         Ok(chain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_acmpca::config::{BehaviorVersion, Credentials, Region};
+    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_types::body::SdkBody;
+    use countersign_protocol::{ApprovalMode, DestinationEntry};
+    use rcgen::{
+        BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyUsagePurpose,
+    };
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use rustls::{ClientConfig, ClientConnection, ServerConfig, ServerConnection};
+    use serde_json::{Value, json};
+    use tempfile::tempdir;
+
+    const CA: &str = "arn:private:service:region:account:certificate-authority/example";
+
+    struct TestSite {
+        origin: Origin,
+        scope: DestinationScope,
+        policy: DestinationPolicy,
+        key: KeyPair,
+        csr: Vec<u8>,
+        ca: CertificateDer<'static>,
+        ca_key: KeyPair,
+        deadline: OffsetDateTime,
+    }
+    impl TestSite {
+        fn new() -> Self {
+            let origin = Origin::parse("sample.test:443").unwrap();
+            let policy = DestinationPolicy::new(vec![
+                DestinationEntry::new("site", 1, &origin.to_string(), ApprovalMode::ExactHost)
+                    .unwrap(),
+            ])
+            .unwrap();
+            let scope = policy.scope_for(&origin).unwrap();
+            let key = KeyPair::generate().unwrap();
+            let csr = CertificateParams::new(vec![origin.host().to_owned()])
+                .unwrap()
+                .serialize_request(&key)
+                .unwrap()
+                .der()
+                .to_vec();
+            let mut params = CertificateParams::default();
+            params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+            params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+            let ca_key = KeyPair::generate().unwrap();
+            let ca = params.self_signed(&ca_key).unwrap().der().clone();
+            Self {
+                origin,
+                scope,
+                policy,
+                key,
+                csr,
+                ca,
+                ca_key,
+                deadline: OffsetDateTime::now_utc() + time::Duration::minutes(3),
+            }
+        }
+        fn roots(&self) -> RootCertStore {
+            let mut roots = RootCertStore::empty();
+            roots.add(self.ca.clone()).unwrap();
+            roots
+        }
+        fn leaf_pem(&self, extra_name: bool) -> String {
+            let mut names = vec![self.origin.host().to_owned()];
+            if extra_name {
+                names.push("other.test".into());
+            }
+            let mut p = CertificateParams::new(names).unwrap();
+            p.not_after = self.deadline;
+            p.is_ca = IsCa::ExplicitNoCa;
+            p.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+            p.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+            let issuer = Issuer::from_ca_cert_der(
+                &self.ca,
+                KeyPair::from_pem(&self.ca_key.serialize_pem()).unwrap(),
+            )
+            .unwrap();
+            p.signed_by(&self.key, &issuer).unwrap().pem()
+        }
+        fn tls(&self, chain: Chain) {
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
+            let c = ClientConfig::builder_with_provider(provider.clone())
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(self.roots())
+                .with_no_client_auth();
+            let s = ServerConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(
+                    chain,
+                    PrivatePkcs8KeyDer::from(self.key.serialize_der()).into(),
+                )
+                .unwrap();
+            let mut client = ClientConnection::new(
+                Arc::new(c),
+                ServerName::try_from(self.origin.host().to_owned()).unwrap(),
+            )
+            .unwrap();
+            let mut server = ServerConnection::new(Arc::new(s)).unwrap();
+            for _ in 0..8 {
+                let mut flight = Vec::new();
+                client.write_tls(&mut flight).unwrap();
+                server.read_tls(&mut &flight[..]).unwrap();
+                server.process_new_packets().unwrap();
+                flight.clear();
+                server.write_tls(&mut flight).unwrap();
+                client.read_tls(&mut &flight[..]).unwrap();
+                client.process_new_packets().unwrap();
+                if !client.is_handshaking() && !server.is_handshaking() {
+                    return;
+                }
+            }
+            panic!("issued leaf did not complete a handshake");
+        }
+        fn remote(&self, extra_name: bool) -> (SharedIssuer, StaticReplayClient) {
+            let event = |status: u16, body: Value| {
+                ReplayEvent::new(
+                    hyper::http::Request::builder()
+                        .uri("https://pca.example/")
+                        .body(SdkBody::empty())
+                        .unwrap(),
+                    hyper::http::Response::builder()
+                        .status(status)
+                        .header("content-type", "application/x-amz-json-1.1")
+                        .body(SdkBody::from(body.to_string()))
+                        .unwrap(),
+                )
+            };
+            let http = StaticReplayClient::new(vec![
+                event(200, json!({"CertificateArn":format!("{CA}/certificate/1")})),
+                event(
+                    400,
+                    json!({"__type":"RequestInProgressException","message":"still issuing"}),
+                ),
+                event(200, json!({"Certificate":self.leaf_pem(extra_name)})),
+            ]);
+            let sdk = aws_sdk_acmpca::Config::builder()
+                .protocol(AwsJsonRpcProtocol::aws_json_1_1())
+                .behavior_version(BehaviorVersion::latest())
+                .http_client(http.clone())
+                .region(Region::new("us-east-1"))
+                .endpoint_url("https://pca.example")
+                .credentials_provider(Credentials::new("test", "test", None, None, "test"))
+                .build();
+            let verifier = WebPkiServerVerifier::builder_with_provider(
+                Arc::new(self.roots()),
+                Arc::new(rustls::crypto::ring::default_provider()),
+            )
+            .build()
+            .unwrap();
+            (
+                SharedIssuer {
+                    source: Source::Remote {
+                        client: Client::from_conf(sdk),
+                        ca: CA.into(),
+                        template: "template".into(),
+                        algorithm: SigningAlgorithm::Sha256Withecdsa,
+                    },
+                    verifier,
+                    policy: self.policy.clone(),
+                    expected_uri: None,
+                },
+                http,
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn local_shared_ca_checks_key_and_issues_for_tls() {
+        let site = TestSite::new();
+        let dir = tempdir().unwrap();
+        let cert = dir.path().join("ca.pem");
+        let key = dir.path().join("key.pem");
+        fs::write(
+            &cert,
+            pem::encode(&pem::Pem::new("CERTIFICATE", site.ca.as_ref())),
+        )
+        .unwrap();
+        fs::write(&key, site.ca_key.serialize_pem()).unwrap();
+        let source = SharedCaSource::Local {
+            cert,
+            key: key.clone(),
+        };
+        let issuer = SharedIssuer::open(source.clone(), site.policy.clone())
+            .await
+            .unwrap();
+        let chain = issuer
+            .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
+            .await
+            .unwrap();
+        site.tls(chain);
+        fs::write(key, KeyPair::generate().unwrap().serialize_pem()).unwrap();
+        assert!(SharedIssuer::open(source, site.policy).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sdk_issues_and_retrieves_exact_certificate_before_tls() {
+        let site = TestSite::new();
+        let (issuer, http) = site.remote(false);
+        let chain = issuer
+            .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
+            .await
+            .unwrap();
+        site.tls(chain);
+        let calls = http
+            .actual_requests()
+            .map(|r| {
+                assert_eq!(r.uri(), "https://pca.example/");
+                assert!(
+                    r.headers()
+                        .get("authorization")
+                        .unwrap()
+                        .starts_with("AWS4-HMAC-SHA256 ")
+                );
+                serde_json::from_slice::<Value>(r.body().bytes().unwrap()).unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0]["CertificateAuthorityArn"], CA);
+        assert_eq!(calls[0]["TemplateArn"], "template");
+        assert_eq!(calls[0]["Validity"]["Type"], "ABSOLUTE");
+        assert_eq!(
+            calls[0]["Validity"]["Value"],
+            site.deadline.unix_timestamp()
+        );
+        assert_eq!(calls[1], calls[2]);
+        let (issuer, _) = site.remote(true);
+        assert!(
+            issuer
+                .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
+                .await
+                .is_err()
+        );
     }
 }

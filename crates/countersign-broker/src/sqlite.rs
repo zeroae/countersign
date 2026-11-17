@@ -20,6 +20,35 @@ impl SqliteApprovalStore {
     }
 }
 
+pub(crate) fn advance_device(
+    connection: &Connection,
+    owner: &Owner,
+    pairing: &str,
+    key: &str,
+) -> Result<DeviceSession> {
+    if owner.integrator.is_empty() || owner.user.is_empty() || pairing.is_empty() || key.is_empty()
+    {
+        return Err(StoreError::InvalidInput);
+    }
+    let generation = connection
+        .query_row(
+            "INSERT INTO device (integrator, owner, pairing, key_id, generation)
+             VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT (integrator, owner, pairing) DO UPDATE SET generation = generation + 1
+             WHERE key_id = excluded.key_id RETURNING generation",
+            params![owner.integrator, owner.user, pairing, key],
+            |r| r.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::Unavailable)?;
+    Ok(DeviceSession {
+        owner: owner.clone(),
+        pairing: pairing.into(),
+        key: key.into(),
+        generation,
+    })
+}
+
 fn check_pending_capacity(tx: &Transaction<'_>, owner: &Owner, at: i64) -> Result<()> {
     let (by_user,total)=tx.query_row("SELECT COALESCE(SUM(integrator=?1 AND owner=?2),0), COUNT(*) FROM approval WHERE state='pending' AND pending_until>?3",
         params![owner.integrator,owner.user,at],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?;
@@ -32,7 +61,7 @@ fn now(tx: &Transaction<'_>) -> Result<i64> {
     Ok(tx.query_row("SELECT unixepoch()", [], |r| r.get(0))?)
 }
 
-fn record_event(
+pub(crate) fn record_event(
     tx: &Transaction<'_>,
     approval: Uuid,
     actor_offer: Option<Uuid>,
@@ -318,31 +347,7 @@ impl ApprovalStore for SqliteApprovalStore {
         pairing: &str,
         key: &str,
     ) -> Result<DeviceSession> {
-        if owner.integrator.is_empty()
-            || owner.user.is_empty()
-            || pairing.is_empty()
-            || key.is_empty()
-        {
-            return Err(StoreError::InvalidInput);
-        }
-        let generation = self
-            .connection
-            .query_row(
-                "INSERT INTO device (integrator, owner, pairing, key_id, generation)
-             VALUES (?1, ?2, ?3, ?4, 1)
-             ON CONFLICT (integrator, owner, pairing) DO UPDATE SET generation = generation + 1
-             WHERE key_id = excluded.key_id RETURNING generation",
-                params![owner.integrator, owner.user, pairing, key],
-                |r| r.get(0),
-            )
-            .optional()?
-            .ok_or(StoreError::Unavailable)?;
-        Ok(DeviceSession {
-            owner: owner.clone(),
-            pairing: pairing.into(),
-            key: key.into(),
-            generation,
-        })
+        advance_device(&self.connection, owner, pairing, key)
     }
 
     fn offer(&mut self, device: &DeviceSession, approval: Uuid) -> Result<Offer> {
@@ -504,6 +509,114 @@ impl ApprovalStore for SqliteApprovalStore {
         )?;
         tx.commit()?;
         Ok(disposition)
+    }
+
+    fn revoke(
+        &mut self,
+        owner: &Owner,
+        device: Option<&DeviceSession>,
+        id: Uuid,
+    ) -> Result<Vec<Uuid>> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(device) = device {
+            require_current_session(&tx, device)?;
+            if &device.owner != owner {
+                return Err(StoreError::Unavailable);
+            }
+        }
+        let id_text = id.to_string();
+        let authorized: bool=tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM approval a WHERE a.id=?1 AND a.integrator=?2 AND a.owner=?3
+             AND (?4 IS NULL OR EXISTS(SELECT 1 FROM approved_grant g JOIN offer o ON o.id=g.offer
+             WHERE g.approval=a.id AND o.pairing=?4 AND o.key_id=?5)))",
+            params![id_text,owner.integrator,owner.user,device.map(|d|&d.pairing),device.map(|d|&d.key)],
+            |r|r.get(0),
+        )?;
+        if !authorized {
+            return Err(StoreError::Unavailable);
+        }
+        let affected=tx.prepare("SELECT id FROM approval a WHERE state IN ('approved','pending') AND
+            (id=?1 OR (state='pending' AND EXISTS(SELECT 1 FROM renewal WHERE predecessor=?1 AND request=a.id)))")?
+            .query_map([&id_text],|r|parse_id(r,"id"))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let at = now(&tx)?;
+        for target in &affected {
+            tx.execute(
+                "UPDATE approval SET state='cancelled' WHERE id=?1",
+                [target.to_string()],
+            )?;
+            let actor = if device.is_some() {
+                tx.query_row(
+                    "SELECT offer FROM approved_grant WHERE approval=?1",
+                    [&id_text],
+                    |r| parse_id(r, "offer"),
+                )
+                .optional()?
+            } else {
+                None
+            };
+            record_event(
+                &tx,
+                *target,
+                actor,
+                if *target == id {
+                    "revoked"
+                } else {
+                    "predecessor_revoked"
+                },
+                at,
+            )?;
+        }
+        tx.commit()?;
+        Ok(affected)
+    }
+
+    fn bind_activation(
+        &mut self,
+        workload: &Workload,
+        activation: &countersign_protocol::wire::Activate,
+        chain: &countersign_protocol::wire::PublicChain,
+        verified_at_ms: u64,
+        valid_until_ms: u64,
+    ) -> Result<()> {
+        let id =
+            Uuid::parse_str(activation.approval.as_str()).map_err(|_| StoreError::InvalidInput)?;
+        let grant = &activation.grant;
+        if valid_until_ms <= verified_at_ms
+            || crate::credentials::fingerprint(chain.as_slice()[0].as_slice())
+                != grant.cert_sha256.0
+        {
+            return Err(StoreError::InvalidInput);
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let public_chain = serde_json::to_string(chain).map_err(|_| StoreError::InvalidInput)?;
+        let encoded = serde_json::to_string(activation).map_err(|_| StoreError::InvalidInput)?;
+        let observed = i64::try_from(verified_at_ms).map_err(|_| StoreError::InvalidInput)?;
+        let end = i64::try_from(valid_until_ms).map_err(|_| StoreError::InvalidInput)?;
+        let written=tx.execute("INSERT OR IGNORE INTO working_identity(approval,grant_id,activation,public_chain,verified_at_ms,valid_until_ms)
+            SELECT a.id,g.id,?1,?2,?3,?4 FROM approval a JOIN approved_grant g ON a.id=g.approval JOIN offer o ON o.id=g.offer
+            WHERE a.id=?5 AND a.integrator=?6 AND a.owner=?7 AND a.context=?8 AND a.workload=?9 AND a.workload_generation=?10
+            AND a.state='approved' AND a.current=1 AND g.expires_at>unixepoch() AND g.id=?11 AND o.id=?12
+            AND o.pairing=?13 AND o.key_id=?14 AND g.certificate=?15 AND a.entry_id=?16 AND a.entry_version=?17 AND a.scope=?18",
+            params![encoded,public_chain,observed,end,activation.approval.as_str(),workload.owner.integrator,workload.owner.user,
+                workload.context,workload.instance,i64::try_from(workload.generation).map_err(|_|StoreError::InvalidInput)?,
+                grant.grant.as_str(),activation.offer.as_str(),grant.device.pairing.as_str(),grant.device.key.as_str(),
+                grant.cert_sha256.as_slice(),grant.scope.entry_id(),i64::try_from(grant.scope.entry_version()).map_err(|_|StoreError::InvalidInput)?,
+                grant.scope.pattern().to_string()])?;
+        if written == 0 {
+            let same:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM working_identity WHERE approval=?1 AND activation=?2 AND public_chain=?3)",
+                params![activation.approval.as_str(),encoded,public_chain],|r|r.get(0))?;
+            if !same {
+                return Err(StoreError::Resolved);
+            }
+        } else {
+            record_event(&tx, id, None, "activation_bound", now(&tx)?)?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn approved_grant(

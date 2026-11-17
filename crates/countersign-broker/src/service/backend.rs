@@ -50,29 +50,32 @@ pub(super) async fn workload(
         .apply(move |a| {
             let generation =
                 i64::try_from(req.workload_generation.get()).map_err(|_| Fault::Invalid)?;
-            let changed = a.store.connection.execute(
-                "INSERT INTO workload_binding(integrator,owner,context,instance,generation,retired)
-            VALUES (?1,?2,?3,?4,?5,0) ON CONFLICT(integrator,owner,context,instance) DO UPDATE
-            SET generation=excluded.generation,retired=0 WHERE generation < excluded.generation OR
-              (generation=excluded.generation AND retired=0)",
-                params![
-                    a.integrator.as_str(),
-                    req.user.as_str(),
-                    req.context.as_str(),
-                    req.workload.as_str(),
-                    generation
-                ],
-            )?;
-            if changed != 1 {
+            let b=w::WorkloadBinding {
+                integrator:a.integrator.clone(), user:req.user, context:req.context,
+                workload:req.workload, workload_generation:req.workload_generation,
+            };
+            let tx = a.store.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let previous = tx.query_row(
+                "SELECT generation,retired FROM workload_binding WHERE integrator=?1 AND owner=?2 AND context=?3 AND instance=?4",
+                params![b.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str()],
+                |r|Ok((r.get::<_,i64>(0)?, r.get::<_,bool>(1)?)),
+            ).optional()?;
+            if previous.is_some_and(|(old,retired)|old>generation || (old==generation && retired)) {
                 return Err(Fault::Denied);
             }
-            Ok(w::WorkloadBinding {
-                integrator: a.integrator.clone(),
-                user: req.user,
-                context: req.context,
-                workload: req.workload,
-                workload_generation: req.workload_generation,
-            })
+            let retired=match previous {
+                Some((old,_)) if old<generation => controls::retire_generation(&tx,&b,old)?,
+                _=>Vec::new(),
+            };
+            tx.execute(
+                "INSERT INTO workload_binding(integrator,owner,context,instance,generation,retired)
+                 VALUES (?1,?2,?3,?4,?5,0) ON CONFLICT(integrator,owner,context,instance) DO UPDATE
+                 SET generation=excluded.generation,retired=0",
+                params![b.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str(),generation],
+            )?;
+            tx.commit()?;
+            controls::clear_live(a,&retired);
+            Ok(b)
         })
         .await?;
     let (token, exp) = s
@@ -138,7 +141,7 @@ pub(super) async fn request(
             Trigger::ExplicitConnect,
         )?;
         if r.state == crate::ApprovalState::Pending {
-            a.notify(req.binding.user.as_str(), wire_id(r.id));
+            a.notify_pending(&r);
         }
         Ok(Json(
             json!({"id":r.id.to_string(),"state":format!("{:?}",r.state).to_ascii_lowercase()}),
@@ -158,13 +161,23 @@ pub(super) async fn status(
     Json(req): Json<Owned>,
 ) -> Result<Json<Value>> {
     auth(&s, &h)?;
-    s.apply(move|a| {
-        let state=a.store.connection.query_row(
-          "SELECT CASE WHEN state='pending' AND pending_until <= unixepoch() THEN 'expired'
-             WHEN state='approved' AND EXISTS(SELECT 1 FROM approved_grant WHERE approval=approval.id AND expires_at<=unixepoch()) THEN 'expired'
-             ELSE state END FROM approval WHERE id=?1 AND integrator=?2 AND owner=?3",
-          params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()],|r|r.get::<_,String>(0)).optional()?.ok_or(Fault::Unavailable)?;
-        Ok(Json(json!({"id":req.id,"state":state})))
+    s.apply(move |a| {
+        let row = a.store.connection.query_row(
+            "SELECT CASE WHEN state='pending' AND pending_until<=unixepoch() THEN 'expired'
+             WHEN state='approved' AND g.expires_at<=unixepoch() THEN 'expired' ELSE state END,
+             g.id, EXISTS(SELECT 1 FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='mtls_accepted'),
+             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='ingress_closed'),
+             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed')
+             FROM approval a LEFT JOIN approved_grant g ON g.approval=a.id
+             WHERE a.id=?1 AND a.integrator=?2 AND a.owner=?3",
+            params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()],
+            |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?)),
+        ).optional()?.ok_or(Fault::Unavailable)?;
+        let (state, grant, accepted, ingress_closed, egress_closed) = row;
+        let ready = state=="approved" && grant.and_then(|id|a.grants.get(&id)).is_some_and(|g|{
+            g.acknowledged && a.peers.get(g.activation.grant.device.pairing.as_str()).is_some_and(|p|p.binding==g.activation.grant.device)
+        });
+        Ok(Json(json!({"id":req.id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed})))
     }).await
 }
 pub(super) async fn revoke(
@@ -173,29 +186,16 @@ pub(super) async fn revoke(
     Json(req): Json<Owned>,
 ) -> Result<StatusCode> {
     auth(&s, &h)?;
-    s.apply(move|a|{
-        let tx=a.store.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let changed=tx.execute("UPDATE approval SET state='cancelled' WHERE id=?1 AND integrator=?2 AND owner=?3
-            AND state IN ('pending','approved') AND current=1",
-          params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()])?;
-        if changed!=1 {return Err(Fault::Unavailable);}
-        let event=Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO audit(event_id,approval,kind,occurred_at) VALUES(?1,?2,'revoked',unixepoch())",
-            params![event,req.id.as_str()])?;
-        tx.execute("INSERT INTO outbox(event_id,approval) VALUES(?1,?2)",params![event,req.id.as_str()])?;
-        tx.commit()?;
-        let retired:Vec<_>=a.grants.iter().filter(|(_,g)|g.activation.approval==req.id).map(|(id,_)|id.clone()).collect();
-        for id in retired {
-            if let Some(grant)=a.grants.remove(&id) {
-                a.waiting.retain(|_,op|op.op.grant.grant!=grant.activation.grant.grant);
-                if let Some(p)=a.peers.get(grant.activation.grant.device.pairing.as_str()){
-                    let _=send(p,fresh(),w::BrokerToCompanion::Retire(grant.activation.grant));
-                }
-            }
-        }
-        a.notify(req.user.as_str(),req.id);
+    s.apply(move |a| {
+        let owner = Owner {
+            integrator: a.integrator.as_str().into(),
+            user: req.user.as_str().into(),
+        };
+        let affected = a.store.revoke(&owner, None, uid(&req.id)?)?;
+        controls::withdraw(a, &owner, affected);
         Ok(StatusCode::NO_CONTENT)
-    }).await
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -218,7 +218,7 @@ pub(super) async fn renew(
             uid(&req.id)?,
             a.max_duration,
         )?;
-        a.notify(req.binding.user.as_str(), wire_id(request.id));
+        a.notify_pending(&request);
         Ok(Json(json!({"id":request.id.to_string(),"state":"pending"})))
     })
     .await

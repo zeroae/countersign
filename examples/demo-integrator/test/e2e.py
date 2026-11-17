@@ -7,8 +7,6 @@ import json
 import os
 from pathlib import Path
 import secrets
-import shlex
-import shutil
 import signal
 import socket
 import ssl
@@ -45,7 +43,6 @@ def run(directory, app, count):
     fixture=prepare(private/'demo', count=count)
     token_file=private/'workload.jwt'
     ca=fixture/'ca.pem'
-    admin=fixture/'admin.token'
     broker_port,proxy_port,ui_port,cdp_port=(port() for _ in range(4))
     origin=f'https://localhost:{ui_port}'
     broker_url=f'https://localhost:{broker_port}'
@@ -102,9 +99,6 @@ def run(directory, app, count):
         gateway=start('gateway',[binary/'countersign-gateway','serve',private/'gateway.json'], {
             'LD_PRELOAD':str(next(Path('/usr/lib').glob('*/libnss_wrapper.so'))),
             'NSS_WRAPPER_HOSTS':str(hosts)})
-        subprocess.run(['timeout','30','bash','-c',
-            'inotifywait -qq -t 25 -e moved_to "$1" || test -f "$1/workload.jwt"',
-            'wait-for-demo',private],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL) if not token_file.exists() and shutil.which('inotifywait') else None
         # Drive enrollment over the real main process/preload isolation boundary.
         # Ubuntu restricts unprivileged user namespaces by AppArmor profile.
         # Give only this test executable its Chromium namespace sandbox during
@@ -152,8 +146,15 @@ def run(directory, app, count):
             subprocess.run(uid+['test','-r',str(public/'sidecar.pem')],check=True)
             for path in [private,token_file,Path('/proc')/str(gateway.pid)/'mem']:
                 assert subprocess.run(uid+['test','-r',str(path)]).returncode!=0
-            args=uid+['env','NO_PROXY=','no_proxy=','HTTPS_PROXY='+proxy_url,'SSL_CERT_FILE='+str(public/'sidecar.pem'),
-                     'curl','--silent','--show-error','--fail','--max-time','95','https://site.test:9444/']
+            # Consume the public shell output of the same helper a real Workload uses.
+            import shlex
+            exports=subprocess.check_output([binary/'countersign-gateway','env',private/'gateway.json'],text=True)
+            public_env=[]
+            for line in exports.splitlines():
+                verb,assignment=shlex.split(line)
+                assert verb=='export'
+                public_env.append(assignment)
+            args=uid+['env','NO_PROXY=','no_proxy=']+public_env+['curl','--silent','--show-error','--fail','--max-time','95','https://site.test:9444/']
             with subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE) as curl:
                 try:
                     rows=page.locator('#requests .identity')
@@ -170,7 +171,14 @@ def run(directory, app, count):
                     assert fingerprint in json.loads((fixture/'fingerprints.json').read_text())
                 finally:
                     if curl.poll() is None:curl.terminate();curl.wait(5)
-            print(f'PASS: selected one of {count} native identities; isolated curl and upstream confirmed {fingerprint}',flush=True)
+            # Revocation is authenticated through the winning physical device. An automatic
+            # retry of the same Workload and host must not create another approval.
+            page.get_by_role('button',name='Revoke access',exact=True).click()
+            expect(page.locator('#pairs')).to_contain_text('Broker recorded revocation',timeout=15000)
+            rejected=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
+            assert rejected.returncode!=0 and not rejected.stdout, 'revoked access reached the site'
+            expect(page.locator('#requests .identity')).to_have_count(0)
+            print(f'PASS: revoked access and suppressed automatic retry; selected one of {count} native identities; isolated curl and upstream confirmed {fingerprint}',flush=True)
 
 
 if __name__=='__main__':

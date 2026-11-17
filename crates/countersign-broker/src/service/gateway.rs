@@ -30,6 +30,42 @@ pub(super) async fn request(
     let frame = w::Frame::<w::GatewayToBroker>::decode(&body).map_err(|_| Fault::Invalid)?;
     let id = frame.request_id;
     let response = match (path.as_str(), frame.message) {
+        ("watch", w::GatewayToBroker::Watch(grant)) => {
+            if grant.workload != binding {
+                return Err(Fault::Denied);
+            }
+            let _permit = s
+                .watchers
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| Fault::Busy)?;
+            let scope = grant.clone();
+            let (mut signal, validity) = s
+                .apply(move |a| {
+                    let at = clock_ms()?;
+                    a.require_gateway(&scope, boot)?;
+                    let validity = a.validate_traffic(&scope, at)?.min(expires * 1000);
+                    let live = a
+                        .grants
+                        .get(scope.grant.as_str())
+                        .ok_or(Fault::Unavailable)?;
+                    Ok((live.retire_signal.subscribe(), validity))
+                })
+                .await?;
+            let wait = Duration::from_millis(validity.saturating_sub(clock_ms()?).min(20_000));
+            match tokio::time::timeout(wait, signal.changed()).await {
+                Ok(_) => w::BrokerToGateway::Retire(grant),
+                Err(_) if validity <= clock_ms()? => w::BrokerToGateway::Retire(grant),
+                Err(_) => w::BrokerToGateway::NoChange(grant),
+            }
+        }
+        ("observe", w::GatewayToBroker::Observed(event)) => {
+            s.apply(move |a| {
+                observations::observe(a, &binding, boot, &event)?;
+                Ok(w::BrokerToGateway::Observed(event))
+            })
+            .await?
+        }
         ("admit", w::GatewayToBroker::Connect(req) | w::GatewayToBroker::Lookup(req)) => {
             s.apply(move |a| {
                 if req.workload != binding {
@@ -48,7 +84,7 @@ pub(super) async fn request(
                 )?;
                 match r.state {
                     ApprovalState::Pending => {
-                        a.notify(binding.user.as_str(), wire_id(r.id));
+                        a.notify_pending(&r);
                         Ok(w::BrokerToGateway::Pending(w::Notice { id: wire_id(r.id) }))
                     }
                     ApprovalState::Approved => {
@@ -119,6 +155,7 @@ pub(super) async fn request(
                 if !g.lease_seq.contains_key(&key) && g.lease_seq.len() >= 64 {
                     return Err(Fault::Busy);
                 }
+                observations::issued(&a.store.connection, &req, enforcer, boot, until)?;
                 g.lease_seq.insert(key, (req.sequence.get(), until));
                 Ok(w::BrokerToGateway::Lease(w::LeaseReply {
                     binding: req,
@@ -133,6 +170,7 @@ pub(super) async fn request(
         ("sign", w::GatewayToBroker::Sign(req)) => {
             let request_id = id.clone();
             let op = req.binding.clone();
+            let deadline = req.deadline_ms;
             let sent_at = Instant::now();
             let (rx, leased_until) = s
                 .apply(move |a| {
@@ -213,7 +251,7 @@ pub(super) async fn request(
             let response = s
                 .apply(move |a| {
                     let at = clock_ms()?;
-                    if expires * 1000 <= at {
+                    if deadline.min(expires * 1000) <= at {
                         return Err(Fault::Expired);
                     }
                     a.validate_grant(&signed.binding.grant, at)?;
@@ -316,11 +354,11 @@ async fn wait_for_signature(
     loop {
         let next = (Instant::now() + Duration::from_secs(10)).min(leased_until);
         tokio::select! {
-            answer=&mut rx=>{
-                if Instant::now()>=leased_until{return Err(Fault::Expired);}
-                return answer.map_err(|_|Fault::Unavailable);
+            answer = &mut rx => {
+                if Instant::now() >= leased_until { return Err(Fault::Expired); }
+                return answer.map_err(|_| Fault::Unavailable);
             }
-            _=sleep_until(next)=>{}
+            _ = sleep_until(next) => {}
         }
         let send_time = Instant::now();
         if send_time >= leased_until {

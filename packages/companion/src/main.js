@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Session } from './session.js';
-import { integratorOrigin, approvalHint } from './origins.js';
+import { integratorOrigin, approvalHint, displayText } from './origins.js';
 import { readTheme } from './theme.js';
 import { startsAtLogin, setStartAtLogin } from './login.js';
 import { PairingStore } from './store.js';
@@ -60,6 +60,13 @@ function attach(record) {
     notice.on('click', show);
     notice.show();
   });
+  s.on('expiring', () => {
+    if (!Notification.isSupported()) return;
+    const notice = new Notification({title:'Countersign', body:'A certificate approval expires within five minutes.'});
+    notice.on('click', show);
+    notice.show();
+  });
+  s.updateReminders();
   s.once('enroll-failed', () => {
     if (!s.record.pairing) {
       sessions.delete(record.id);
@@ -68,6 +75,11 @@ function attach(record) {
     }
   });
   s.open();
+}
+
+function certLabel(raw) {
+  try { return displayText(raw, 1024); }
+  catch { return 'See certificate fingerprint'; }
 }
 
 function installHandlers() {
@@ -92,6 +104,11 @@ function installHandlers() {
         theme:s.record.theme, pendingTheme:s.record.pendingTheme,
         devices:s.devices.filter(d=>d.binding.pairing!==s.record.pairing),
         notices:s.notices,
+        approvals:Object.entries(s.record.receipts ?? {}).filter(([,r]) => r.until > Date.now() || r.revocation === 'pending').map(([id,r]) => ({
+          id, host:r.host || r.scope.pattern, scope:r.scope.pattern, context:r.workload.context, until:r.until,
+          fingerprint:Buffer.from(r.cert,'base64').toString('hex'), revocation:r.revocation,
+          ready:[...s.activations.values()].includes(id),
+        })),
       })),
       confirmation: accountConfirmation && {id:accountConfirmation.id,origin:accountConfirmation.origin,
         user:accountConfirmation.user,code:accountConfirmation.code},
@@ -100,8 +117,9 @@ function installHandlers() {
       offers: all.flatMap(s => [...s.offers.values()].filter(o => o.body.expires_at_ms > Date.now()).map(o => ({
         handle:o.handle, origin:s.record.origin, user:s.record.user, theme:s.record.theme,
         context:o.body.workload.context, host:o.body.initiating_host, scope:o.body.scope.pattern,
+        providerUnavailable:o.providerUnavailable,
         maxDuration:o.body.max_duration_s, defaultDuration:o.body.default_duration_s,
-        identities:o.identities.map(i => ({reference:i.selection, identity:i.subject, issuer:i.issuer,
+        identities:o.identities.map(i => ({reference:i.selection, identity:certLabel(i.subject), issuer:certLabel(i.issuer),
           expiresAt:i.expiresAtMs, fingerprint:Buffer.from(i.certSha256,'base64').toString('hex')})),
       }))),
     };
@@ -157,6 +175,20 @@ function installHandlers() {
     });
     if (all && targets.length !== others.length) throw new Error('Device list changed.');
     s.send('forget_devices', { targets, all_others:all });
+  });
+  action('revoke', async (id, approval) => {
+    const session = sessions.get(id);
+    if (!session?.record.receipts?.[approval]) throw new Error('Unknown approval.');
+    await session.revoke(approval);
+  });
+  action('removeLocal', async id => {
+    const session = sessions.get(id);
+    if (!session?.record.pairing) throw new Error('Unknown pairing.');
+    session.stop();
+    await native.retirePairingKey(session.record.locator);
+    await store.update(id, () => null);
+    sessions.delete(id);
+    changed();
   });
   action('forget', async id => {
     const s = sessions.get(id);

@@ -464,6 +464,7 @@ macro_rules! messages {
 }
 
 messages!(CompanionToBroker {
+    RevokeApproval(Notice) => "revoke_approval",
     Devices(Empty) => "devices",
     ForgetDevices(ForgetDevices) => "forget_devices",
     Enroll(Enroll) => "enroll",
@@ -479,6 +480,7 @@ messages!(CompanionToBroker {
 });
 
 messages!(BrokerToCompanion {
+    RevokeRecorded(Notice) => "revoke_recorded",
     Devices(Devices) => "devices",
     SecurityEvent(SecurityEvent) => "security_event",
     PairingPending(PairingPending) => "pairing_pending",
@@ -494,7 +496,29 @@ messages!(BrokerToCompanion {
     Error(Rejection) => "error",
 });
 
+/// A trusted Gateway's observation of one exact socket. Recording it grants
+/// no authority to continue carrying traffic or performing a signature.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationKind {
+    MtlsAccepted,
+    IngressClosed,
+    EgressClosed,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Observed {
+    pub grant: GrantBinding,
+    pub host: Origin,
+    pub tls_connection: Id,
+    pub enforcer_instance: Id,
+    pub observation: ObservationKind,
+}
+
 messages!(GatewayToBroker {
+    Watch(GrantBinding) => "watch",
+    Observed(Observed) => "observed",
     Connect(Connect) => "connect",
     Lookup(Connect) => "lookup",
     RenewLease(LeaseRequest) => "renew_lease",
@@ -503,6 +527,8 @@ messages!(GatewayToBroker {
 });
 
 messages!(BrokerToGateway {
+    NoChange(GrantBinding) => "no_change",
+    Observed(Observed) => "observed",
     Pending(Notice) => "pending",
     Activate(GatewayActivation) => "activate",
     Retire(GrantBinding) => "retire",

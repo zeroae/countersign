@@ -37,3 +37,32 @@ test('only an exact opaque-ID approval link can wake the Companion', () => {
     assert.throws(() => integratorOrigin(invalid));
   }
 });
+
+test('offline revocation survives restart and waits for a matching authenticated acknowledgment', async () => {
+  const { Session } = await import('../src/session.js');
+  const approval = 'f7e8ef3b-240f-40f0-ba15-a3c56a67a07e';
+  let stored = {id:'local',origin:site,receipts:{[approval]:{until:Date.now()+60000}}};
+  const store = {get:() => structuredClone(stored),update:async (_id,fn) => {stored = fn(structuredClone(stored));}};
+  const retired = [];
+  const native = {retireScope:binding => retired.push(JSON.parse(binding))};
+  const offline = new Session({record:stored,store,native});
+  offline.active.set('grant',{grant:'grant'});
+  offline.activations.set('grant',approval);
+  await offline.revoke(approval);
+  assert.deepEqual(retired,[{grant:'grant'}]);
+  assert.equal(stored.receipts[approval].revocation,'pending');
+  const restored = new Session({record:store.get(),store,native});
+  restored.device = {pairing:'device'};
+  restored.send = (type, body) => {
+    assert.equal(type,'revoke_approval');
+    assert.equal(body.id,approval);
+    return 'request';
+  };
+  restored.sendRevocation(approval);
+  await restored.receive({type:'revoke_recorded',body:{id:approval},request_id:'old'},() => true);
+  assert.equal(stored.receipts[approval].revocation,'pending');
+  await restored.receive({type:'revoke_recorded',body:{id:approval},request_id:'request'},() => true);
+  assert.equal(stored.receipts[approval].revocation,'recorded');
+  offline.stop();
+  restored.stop();
+});

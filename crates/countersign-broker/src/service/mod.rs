@@ -25,6 +25,8 @@ use tokio::sync::{Semaphore, mpsc, oneshot};
 use uuid::Uuid;
 
 mod backend;
+mod maintenance;
+mod observations;
 mod push;
 pub use push::PushConfig;
 mod companion;
@@ -80,6 +82,7 @@ pub struct Service {
     push_sender: Option<Arc<push::Sender>>,
     state: Arc<Mutex<Authority>>,
     credentials: Arc<Credentials>,
+    watchers: Arc<Semaphore>,
     slots: Arc<Semaphore>,
     connections: Arc<Semaphore>,
 }
@@ -94,6 +97,7 @@ struct Peer {
     send: mpsc::Sender<w::Frame<w::BrokerToCompanion>>,
 }
 struct LiveGrant {
+    retire_signal: tokio::sync::watch::Sender<()>,
     gateway_boot: Option<Uuid>,
     activation: w::Activate,
     chain: w::PublicChain,
@@ -111,12 +115,15 @@ struct SignWait {
     reply: oneshot::Sender<w::Signed>,
 }
 struct Authority {
+    _database_lock: std::fs::File,
+    audit_retention_days: NonZeroU32,
     store: SqliteApprovalStore,
     origin: Origin,
     integrator: w::Id,
     policy: DestinationPolicy,
     max_duration: NonZeroU32,
     validators: HashMap<String, Validator>,
+    announced: HashMap<Uuid, u64>,
     enrollments: HashMap<String, PendingPair>,
     peers: HashMap<String, Peer>,
     grants: HashMap<String, LiveGrant>,
@@ -126,33 +133,52 @@ impl Service {
     pub fn open(config: &Config) -> std::result::Result<Self, Box<dyn Error>> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let credentials = Arc::new(config.credentials()?);
-        let store = SqliteApprovalStore::open(&config.database)?;
-        // Traffic keys, device channels and worker generations are ephemeral.
-        // A restarted process must demand new consent before reactivation.
-        store.connection.execute(
-            "UPDATE approval SET current=0 WHERE state IN ('pending','approved')",
-            [],
-        )?;
+        let policy = config.policy()?;
+        let validators = config.client_validators()?;
+        let push_sender = config.web_push.as_ref().map(PushConfig::load).transpose()?;
+        let lock = maintenance::lock_database(&config.database)?;
+        let mut store = SqliteApprovalStore::open(&config.database)?;
+        maintenance::fence_boot(
+            &mut store,
+            config.integrator.as_str(),
+            &config.origin,
+            false,
+        )
+        .map_err(|_| "could not fence prior authority")?;
         let state = Authority {
+            _database_lock: lock,
+            audit_retention_days: config.audit_retention_days,
             store,
             origin: config.origin.clone(),
             integrator: config.integrator.clone(),
-            policy: config.policy()?,
+            policy,
             max_duration: config.max_duration_s,
-            validators: config.client_validators()?,
+            validators,
+            announced: HashMap::new(),
             enrollments: HashMap::new(),
             peers: HashMap::new(),
             grants: HashMap::new(),
             waiting: HashMap::new(),
         };
         Ok(Self {
-            push_sender: config.web_push.as_ref().map(PushConfig::load).transpose()?,
+            push_sender,
             state: Arc::new(Mutex::new(state)),
             credentials,
+            watchers: Arc::new(Semaphore::new(512)),
             slots: Arc::new(Semaphore::new(128)),
             connections: Arc::new(Semaphore::new(256)),
         })
     }
+    /// Run with the service stopped, after restoring a database backup. A fresh
+    /// enrollment is required for every device. The administrator reconciles
+    /// access policy and clears emergency stop before allowing traffic.
+    pub fn recover_backup(config: &Config) -> std::result::Result<(), Box<dyn Error>> {
+        let _lock = maintenance::lock_database(&config.database)?;
+        let mut store = SqliteApprovalStore::open(&config.database)?;
+        maintenance::fence_boot(&mut store, config.integrator.as_str(), &config.origin, true)
+            .map_err(|_| "backup recovery failed".into())
+    }
+
     async fn apply<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Authority) -> Result<T> + Send + 'static,
@@ -172,6 +198,7 @@ impl Service {
         .map_err(|_| Fault::Storage)?
     }
     pub fn router(self) -> Router {
+        maintenance::start(&self.state);
         if let Some(sender) = self.push_sender.clone() {
             push::start(self.clone(), sender);
         }
@@ -180,6 +207,10 @@ impl Service {
             .route("/v1/companion", get(companion::upgrade))
             .route("/v1/gateway/{operation}", post(gateway::request))
             .route("/v1/backend/workloads", post(backend::workload))
+            .route(
+                "/v1/backend/workloads/retire",
+                post(controls::retire_workload),
+            )
             .route("/v1/backend/pairings/confirm", post(backend::confirm))
             .route("/v1/backend/requests", post(backend::request))
             .route("/v1/backend/status", post(backend::status))
@@ -247,6 +278,7 @@ impl Authority {
             "SELECT EXISTS(SELECT 1 FROM workload_binding WHERE integrator=?1
           AND owner=?2 AND context=?3 AND instance=?4 AND generation=?5 AND retired=0
              AND NOT EXISTS(SELECT 1 FROM emergency_stop WHERE integrator=?1)
+             AND NOT EXISTS(SELECT 1 FROM issuer_stop WHERE integrator=?1)
              AND NOT EXISTS(SELECT 1 FROM suspended_user WHERE integrator=?1 AND owner=?2)
              AND NOT EXISTS(SELECT 1 FROM closed_context WHERE integrator=?1 AND owner=?2 AND context=?3))",
             params![
@@ -265,6 +297,15 @@ impl Authority {
         let denied=self.store.connection.query_row("SELECT EXISTS(SELECT 1 FROM denied_destination WHERE integrator=?1 AND owner=?2 AND entry_id=?3)",
             params![b.integrator.as_str(),b.user.as_str(),entry],|r|r.get::<_,bool>(0))?;
         if denied { Err(Fault::Denied) } else { Ok(()) }
+    }
+    fn notify_pending(&mut self, r: &crate::Approval) {
+        if self
+            .announced
+            .insert(r.id, r.pending_until as u64 * 1000)
+            .is_none()
+        {
+            self.notify(&r.workload.owner.user, wire_id(r.id));
+        }
     }
     fn notify(&self, user: &str, id: w::Id) {
         for peer in self.peers.values().filter(|p| p.session.owner.user == user) {
@@ -338,6 +379,7 @@ impl Authority {
         }
     }
     fn prune(&mut self, at: u64) {
+        self.announced.retain(|_, until| *until > at);
         self.enrollments.retain(|_, v| v.until > at);
         self.waiting
             .retain(|_, v| v.deadline > at && !v.reply.is_closed());

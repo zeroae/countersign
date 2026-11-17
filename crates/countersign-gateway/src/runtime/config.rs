@@ -8,7 +8,7 @@ use countersign_protocol::{
     ApprovalMode, DestinationEntry, DestinationPolicy, Origin, wire::WorkloadBinding,
 };
 use ipnet::IpNet;
-use rustls_pki_types::{CertificateDer, CertificateRevocationListDer, pem::PemObject};
+use rustls_pki_types::{CertificateDer, pem::PemObject};
 use serde::Deserialize;
 
 use super::{Result, invalid};
@@ -58,13 +58,15 @@ pub(crate) struct Rule {
     pub private_networks: Vec<IpNet>,
     pub roots: PathBuf,
     #[serde(default)]
-    pub crls: Vec<PathBuf>,
+    pub revocation: Option<countersign_pki::Revocation>,
 }
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let config: Self = serde_json::from_slice(&fs::read(path)?)?;
-        if config.shared.is_none() != (config.workload.is_some() && config.workload_token.is_some())
+        let sidecar = config.shared.is_none();
+        if config.workload.is_some() != sidecar
+            || config.workload_token.is_some() != sidecar
             || config.clock_uncertainty_ms >= 30000
         {
             return Err(invalid("invalid Gateway credential or clock configuration"));
@@ -95,6 +97,15 @@ impl Config {
     }
 
     pub fn policy(&self) -> Result<DestinationPolicy> {
+        if self
+            .destinations
+            .iter()
+            .any(|rule| rule.pattern.starts_with("*.") && !rule.private_networks.is_empty())
+        {
+            return Err(invalid(
+                "private egress requires an exact host and prefix rule",
+            ));
+        }
         let entries = self
             .destinations
             .iter()
@@ -121,24 +132,13 @@ impl Config {
 }
 
 pub fn anchors(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let certs = CertificateDer::pem_file_iter(path)?.collect::<std::result::Result<Vec<_>, _>>()?;
-    if certs.is_empty() {
-        return Err(invalid("trust store is empty"));
+    let bytes = countersign_pki::read_import(path)?;
+    let certs =
+        CertificateDer::pem_slice_iter(&bytes).collect::<std::result::Result<Vec<_>, _>>()?;
+    if certs.is_empty() || certs.len() > 64 {
+        return Err(invalid("invalid trust store size"));
     }
     Ok(certs)
-}
-
-pub fn crls(paths: &[PathBuf]) -> Result<Vec<CertificateRevocationListDer<'static>>> {
-    let mut output = Vec::new();
-    for path in paths {
-        let entries = CertificateRevocationListDer::pem_file_iter(path)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        if entries.is_empty() {
-            return Err(invalid("required CRL file is empty"));
-        }
-        output.extend(entries);
-    }
-    Ok(output)
 }
 
 pub async fn resolve_target(origin: &Origin, rule: &Rule, denied: &[IpNet]) -> Result<SocketAddr> {
@@ -162,6 +162,16 @@ pub async fn resolve_target(origin: &Origin, rule: &Rule, denied: &[IpNet]) -> R
 }
 
 fn permitted(ip: IpAddr, internal: &[IpNet]) -> bool {
+    // Private routes pin *all* answers to the configured prefixes. The
+    // cloud infrastructure endpoints below remain forbidden on private routes.
+    if !internal.is_empty() && !internal.iter().any(|prefix| prefix.contains(&ip)) {
+        return false;
+    }
+    if matches!(ip, IpAddr::V4(v) if v.octets()==[168,63,129,16])
+        || matches!(ip, IpAddr::V6(v) if matches!(v.segments(), [0xfd00,0xec2,0,0,0,0,0,0x254|0x253|0x23] | [0xfd20,0xce,0,0,0,0,0,0x254]))
+    {
+        return false;
+    }
     match ip {
         IpAddr::V4(v4) if v4.is_private() => internal.iter().any(|prefix| prefix.contains(&ip)),
         IpAddr::V4(v4) => public_ipv4(v4),
@@ -214,4 +224,36 @@ pub fn publish_ca(path: &Path, pem: &str) -> io::Result<()> {
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn infrastructure_is_denied_even_with_private_prefixes() {
+        let prefixes = ["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()];
+        for addr in [
+            "127.0.0.1",
+            "169.254.169.254",
+            "::ffff:169.254.169.254",
+            "fd00:ec2::254",
+            "fd20:ce::254",
+            "168.63.129.16",
+            "224.0.0.1",
+            "100.100.100.200",
+            "fe80::1",
+            "::",
+            "::1",
+        ] {
+            assert!(
+                !permitted(addr.parse::<IpAddr>().unwrap().to_canonical(), &prefixes),
+                "{addr}"
+            );
+        }
+        let private = ["10.100.0.0/24".parse().unwrap()];
+        assert!(permitted("10.100.0.9".parse().unwrap(), &private));
+        assert!(!permitted("10.101.0.9".parse().unwrap(), &private));
+        assert!(!permitted("8.8.8.8".parse().unwrap(), &private));
+        assert!(!permitted("10.100.0.9".parse().unwrap(), &[]));
+    }
 }

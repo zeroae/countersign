@@ -18,7 +18,7 @@ use std::{
         fd::{AsRawFd, FromRawFd, OwnedFd},
         unix::net::{UnixDatagram, UnixStream},
     },
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -39,18 +39,21 @@ pub struct Start {
 }
 #[derive(Serialize, Deserialize)]
 pub enum CommandMessage {
+    UpstreamResponse,
+    OpenStream(u64),
+    CloseStream(u64),
     Csr(String),
     Sign {
         tls: TlsVersion,
         scheme: Scheme,
         input: String,
-    },
-    Ready {
         peer_chain: Vec<String>,
     },
+    Ready,
 }
 #[derive(Serialize, Deserialize)]
 pub enum Reply {
+    StreamGranted(bool),
     Certificates(Vec<String>),
     Signature(String),
     Proceed,
@@ -93,43 +96,43 @@ pub async fn receive<T: DeserializeOwned>(socket: &mut tokio::net::UnixStream) -
     Ok(serde_json::from_slice(&buf)?)
 }
 
-pub struct ChildHandle {
-    child: Child,
-    control: UnixDatagram,
+/// Only public runtime libraries and the executable enter this grant's new
+/// mount, PID and network namespaces. Each inherited stream is private IPC.
+fn sandbox(executable: &std::path::Path) -> Command {
+    let mut command = Command::new("/usr/bin/bwrap");
+    command
+        .env_clear()
+        .args([
+            "--unshare-all",
+            "--die-with-parent",
+            "--new-session",
+            "--cap-drop",
+            "ALL",
+            "--clearenv",
+            "--ro-bind",
+            "/lib",
+            "/lib",
+            "--ro-bind-try",
+            "/lib64",
+            "/lib64",
+            "--ro-bind",
+        ])
+        .arg(executable)
+        .args(["/worker", "--chdir", "/", "--", "/worker"]);
+    command
 }
-impl Drop for ChildHandle {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
+
+pub struct ChildHandle {
+    child: tokio::process::Child,
+    control: UnixDatagram,
 }
 impl ChildHandle {
     pub fn launch() -> Result<Self> {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
-        // Only the executable, public runtime libraries and three standard
-        // descriptors enter the sandbox. There is no filesystem path to the
-        // CA, Broker credentials, other children, or parent process memory.
-        let exe = std::env::current_exe()?;
-        let child = Command::new("/usr/bin/bwrap")
-            .env_clear()
-            .args([
-                "--unshare-all",
-                "--die-with-parent",
-                "--new-session",
-                "--cap-drop",
-                "ALL",
-                "--clearenv",
-                "--ro-bind",
-                "/lib",
-                "/lib",
-                "--ro-bind-try",
-                "/lib64",
-                "/lib64",
-                "--ro-bind",
-            ])
-            .arg(exe)
-            .args(["/worker", "--chdir", "/", "--", "/worker", "grant-worker"])
+        let child = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
+            .kill_on_drop(true)
+            .arg("grant-worker")
             .stdin(Stdio::from(OwnedFd::from(child_control)))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -210,6 +213,7 @@ impl SigningRelay for Relay {
         &self,
         v: rustls::ProtocolVersion,
         s: rustls::SignatureScheme,
+        peer_chain: &[CertificateDer<'static>],
         data: &[u8],
     ) -> std::result::Result<Vec<u8>, rustls::Error> {
         use rustls::SignatureScheme::*;
@@ -235,6 +239,10 @@ impl SigningRelay for Relay {
             tls,
             scheme,
             input: STANDARD.encode(data),
+            peer_chain: peer_chain
+                .iter()
+                .map(|cert| STANDARD.encode(cert))
+                .collect(),
         })
         .map_err(|_| deny())?;
         control.write_all(&bytes).map_err(|_| deny())?;
@@ -320,18 +328,97 @@ fn run(down: UnixStream, up: UnixStream, mut control: UnixStream) -> Result<()> 
             });
             let up = upstream::connect(up, &start.origin, verifier, chain, fp, relay).await?;
             let up_h2 = up.get_ref().1.alpn_protocol() == Some(b"h2");
-            let peer_chain = up
-                .get_ref()
-                .1
-                .peer_certificates()
-                .ok_or_else(|| invalid("missing peer chain"))?
-                .iter()
-                .map(|cert| STANDARD.encode(cert))
-                .collect();
-            control.write_all(&encode(&CommandMessage::Ready { peer_chain })?)?;
+            control.write_all(&encode(&CommandMessage::Ready)?)?;
             let Reply::Proceed = read(&mut control)? else {
                 return Err(invalid("connection admission refused"));
             };
-            forward::http(down, down_h2, up, up_h2, start.origin).await
+            let limits = Arc::new(StreamLimits {
+                control: Mutex::new(control),
+                next: std::sync::atomic::AtomicU64::new(1),
+                upstream_response: std::sync::atomic::AtomicBool::new(false),
+            });
+            forward::http(down, down_h2, up, up_h2, start.origin, limits).await
         })
+}
+
+/// These short IPC exchanges execute on the thread dedicated to this TLS pair.
+/// The supervisor owns request quotas across concurrent HTTP/2 connections.
+pub struct StreamLimits {
+    control: Mutex<UnixStream>,
+    next: std::sync::atomic::AtomicU64,
+    upstream_response: std::sync::atomic::AtomicBool,
+}
+pub struct StreamPermit {
+    limits: Arc<StreamLimits>,
+    id: u64,
+}
+impl StreamLimits {
+    pub fn observed_response(&self) {
+        if !self.upstream_response.swap(true, Ordering::Relaxed)
+            && let Ok(mut control) = self.control.lock()
+            && let Ok(frame) = encode(&CommandMessage::UpstreamResponse)
+        {
+            let _ = control.write_all(&frame);
+        }
+    }
+    pub fn acquire(self: &Arc<Self>) -> Result<Option<StreamPermit>> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        if id == 0 {
+            return Err(invalid("request counter exhausted"));
+        }
+        let mut control = self
+            .control
+            .lock()
+            .map_err(|_| invalid("worker control unavailable"))?;
+        control.write_all(&encode(&CommandMessage::OpenStream(id))?)?;
+        match read(&mut control)? {
+            Reply::StreamGranted(true) => Ok(Some(StreamPermit {
+                limits: self.clone(),
+                id,
+            })),
+            Reply::StreamGranted(false) => Ok(None),
+            _ => Err(invalid("unexpected request admission response")),
+        }
+    }
+}
+impl Drop for StreamPermit {
+    fn drop(&mut self) {
+        if let (Ok(mut control), Ok(request)) = (
+            self.limits.control.lock(),
+            encode(&CommandMessage::CloseStream(self.id)),
+        ) {
+            let _ = control.write_all(&request);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, net::TcpListener, path::Path};
+    #[test]
+    fn worker_namespace_excludes_parent_files_and_parent_network() {
+        let marker =
+            std::env::temp_dir().join(format!("countersign-isolation-{}", uuid::Uuid::new_v4()));
+        fs::write(&marker, b"private sentinel").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port().to_string();
+        // Use bash only as the test executable, under the same namespace
+        // and mount configuration as a production grant worker.
+        let result=sandbox(Path::new("/bin/bash"))
+            .args(["-c", r#"test ! -e "$1" && test ! -e /proc/1/mem && ! (echo probe > /dev/tcp/127.0.0.1/"$2")"#,"probe"])
+            .arg(&marker).arg(port).output();
+        fs::remove_file(marker).unwrap();
+        let result = result.unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        listener.set_nonblocking(true).unwrap();
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
 }

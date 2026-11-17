@@ -21,8 +21,10 @@ impl SigningRelay for TestRelay {
         &self,
         _: rustls::ProtocolVersion,
         _: rustls::SignatureScheme,
+        peer_chain: &[rustls_pki_types::CertificateDer<'static>],
         data: &[u8],
     ) -> Result<Vec<u8>, rustls::Error> {
+        assert!(!peer_chain.is_empty());
         self.calls.fetch_add(1, Ordering::AcqRel);
         let mut signature = rcgen::SigningKey::sign(&self.key, data).unwrap();
         if self.corrupt {

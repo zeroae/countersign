@@ -277,3 +277,37 @@ pub fn lease_request(grant: GrantBinding, enforcer: Enforcer) -> LeaseRequest {
         sequence: NonZeroU64::MIN,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn lease_budget_starts_at_send_and_never_exceeds_the_absolute_cap() {
+        let now = utc_ms().unwrap();
+        let budget = NonZeroU32::new(30000).unwrap();
+        assert!(
+            Lease::from_reply(
+                Instant::now() - Duration::from_secs(31),
+                now - 31000,
+                budget,
+                now + 60000,
+                100
+            )
+            .is_err()
+        );
+        assert!(Lease::from_reply(Instant::now(), now, budget, now + 99, 100).is_err());
+        assert!(
+            Lease::from_reply(
+                Instant::now(),
+                now,
+                NonZeroU32::new(30001).unwrap(),
+                now + 60000,
+                100
+            )
+            .is_err()
+        );
+        let sent = Instant::now();
+        let capped = Lease::from_reply(sent, now, budget, now + 2000, 100).unwrap();
+        assert_eq!(capped.deadline, sent + Duration::from_millis(1900));
+    }
+}

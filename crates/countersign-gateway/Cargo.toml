@@ -7,7 +7,9 @@ publish.workspace = true
 [dependencies]
 aws-config = { version = "1.13.3", default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process"] }
 aws-sdk-acmpca = "1.130"
+aws-smithy-json = "0.65.1"
 pem = "3"
+countersign-pki = { path = "../countersign-pki" }
 countersign-protocol = { path = "../countersign-protocol" }
 rcgen = { version = "0.14.10", features = ["x509-parser"] }
 ring = "0.17.14"
@@ -33,3 +35,8 @@ ipnet = { version = "2", features = ["serde"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.31", features = ["socket", "uio", "process", "resource"] }
+
+[dev-dependencies]
+aws-smithy-http-client = { version = "1.5", features = ["test-util"] }
+aws-smithy-types = "1"
+tempfile = "3"

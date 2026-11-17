@@ -9,7 +9,7 @@ use rcgen::{
     RevokedCertParams,
 };
 use ring::{digest, rand::SystemRandom, signature};
-use std::fs;
+use std::{fs, num::NonZeroU32};
 use tempfile::TempDir;
 use time::{Duration as Days, OffsetDateTime};
 use x509_ocsp::{

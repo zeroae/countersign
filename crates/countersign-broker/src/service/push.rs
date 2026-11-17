@@ -118,6 +118,27 @@ fn public_ip(ip: IpAddr) -> bool {
 }
 
 impl Sender {
+    fn message(
+        &self,
+        url: &Url,
+        subscription_keys: &Keys,
+        approval: Uuid,
+        ttl: u32,
+    ) -> Result<(HeaderMap, Vec<u8>)> {
+        let (public, auth) = keys(subscription_keys)?;
+        let request = WebPushBuilder::new(
+            url.as_str().parse().map_err(|_| Fault::Invalid)?,
+            public,
+            auth,
+        )
+        .with_valid_duration(Duration::from_secs(ttl.into()))
+        .with_vapid(&self.key, &self.contact)
+        .build(serde_json::to_vec(&approval.to_string()).map_err(|_| Fault::Invalid)?)
+        .map_err(|_| Fault::Unavailable)?;
+        let (parts, body) = request.into_parts();
+        Ok((parts.headers, body))
+    }
+
     async fn deliver(
         &self,
         subscription: &Subscription,
@@ -145,21 +166,11 @@ impl Sender {
             .timeout(Duration::from_secs(6))
             .build()
             .map_err(|_| Fault::Unavailable)?;
-        let (public, auth) = keys(&subscription.keys)?;
-        let request = WebPushBuilder::new(
-            url.as_str().parse().map_err(|_| Fault::Invalid)?,
-            public,
-            auth,
-        )
-        .with_valid_duration(Duration::from_secs(ttl.into()))
-        .with_vapid(&self.key, &self.contact)
-        .build(serde_json::to_vec(&approval.to_string()).map_err(|_| Fault::Invalid)?)
-        .map_err(|_| Fault::Unavailable)?;
-        let (parts, body) = request.into_parts();
+        let (headers, ciphertext) = self.message(&url, &subscription.keys, approval, ttl)?;
         Ok(client
             .post(url)
-            .headers(parts.headers)
-            .body(body)
+            .headers(headers)
+            .body(ciphertext)
             .send()
             .await
             .map_err(|_| Fault::Unavailable)?
@@ -182,14 +193,23 @@ async fn register(
     let sender = s.push_sender.as_ref().ok_or(Fault::Unavailable)?;
     endpoint(&req.subscription.endpoint, &sender.hosts)?;
     keys(&req.subscription.keys)?;
-    s.apply(move|a|{
-        let db=&a.store.connection;
-        let count:i64=db.query_row("SELECT count(*) FROM push_subscription WHERE owner=?1",[req.user.as_str()],|r|r.get(0))?;
-        if count>=16{return Err(Fault::Busy);}
-        let changed=db.execute("INSERT INTO push_subscription(owner,endpoint,subscription) VALUES (?1,?2,?3)
-            ON CONFLICT(endpoint) DO UPDATE SET subscription=excluded.subscription WHERE owner=excluded.owner",
-            params![req.user.as_str(),req.subscription.endpoint,serde_json::to_string(&req.subscription).map_err(|_|Fault::Invalid)?])?;
-        if changed==0 {return Err(Fault::Denied);} Ok(())
+    s.apply(move |a| {
+        let connection = &a.store.connection;
+        let owner = req.user.as_str();
+        let endpoint = req.subscription.endpoint.as_str();
+        let count: i64 = connection.query_row(
+            "SELECT count(*) FROM push_subscription WHERE owner=?1 AND endpoint<>?2",
+            params![owner, endpoint], |row| row.get(0)
+        )?;
+        if count >= 16 { return Err(Fault::Busy); }
+        let serialized = serde_json::to_string(&req.subscription).map_err(|_|Fault::Invalid)?;
+        let changed = connection.execute(
+            "INSERT INTO push_subscription(owner,endpoint,subscription) VALUES (?1,?2,?3)
+             ON CONFLICT(endpoint) DO UPDATE SET subscription=excluded.subscription WHERE owner=excluded.owner",
+            params![owner, endpoint, serialized]
+        )?;
+        if changed == 0 { return Err(Fault::Denied); }
+        Ok(())
     }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -272,6 +292,38 @@ pub(super) fn start(service: Service, sender: Arc<Sender>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subscription_decrypts_only_an_opaque_id() {
+        use web_push_native::p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
+        let recipient = SecretKey::from_slice(&[11; 32]).unwrap();
+        let auth = [19; 16];
+        let keys = Keys {
+            p256dh: URL_SAFE_NO_PAD
+                .encode(recipient.public_key().to_encoded_point(false).as_bytes()),
+            auth: URL_SAFE_NO_PAD.encode(auth),
+        };
+        let sender = Sender {
+            key: ES256KeyPair::generate(),
+            contact: "mailto:owner@example.test".into(),
+            hosts: HashSet::from(["push.example".into()]),
+        };
+        let id = Uuid::new_v4();
+        let url = endpoint("https://push.example/unique", &sender.hosts).unwrap();
+        let (headers, ciphertext) = sender.message(&url, &keys, id, 77).unwrap();
+        assert_eq!(headers["ttl"], "77");
+        assert_eq!(headers["content-encoding"], "aes128gcm");
+        assert!(
+            headers["authorization"]
+                .to_str()
+                .unwrap()
+                .starts_with("vapid ")
+        );
+        let plaintext = web_push_native::decrypt(ciphertext, &recipient, &auth.into()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<String>(&plaintext).unwrap(),
+            id.to_string()
+        );
+    }
     #[test]
     fn push_service_is_exact_and_public() {
         let hosts = HashSet::from(["push.example".to_owned()]);

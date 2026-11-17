@@ -20,8 +20,13 @@ pub struct Config {
     destinations: Vec<Entry>,
     #[serde(default = "max_duration")]
     pub max_duration_s: NonZeroU32,
+    #[serde(default = "audit_retention_days")]
+    pub audit_retention_days: NonZeroU32,
     pub tls: Option<Tls>,
     pub web_push: Option<crate::service::PushConfig>,
+}
+fn audit_retention_days() -> NonZeroU32 {
+    NonZeroU32::new(30).unwrap()
 }
 fn max_duration() -> NonZeroU32 {
     NonZeroU32::new(8 * 3600).unwrap()

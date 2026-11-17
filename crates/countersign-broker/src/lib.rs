@@ -160,6 +160,26 @@ pub trait ApprovalStore {
         decision: &Decision,
     ) -> Result<Disposition>;
 
+    /// Withdraw a scoped request and its pending renewal as one operation.
+    /// When called by a device, only its winning pairing and key can revoke.
+    fn revoke(
+        &mut self,
+        owner: &Owner,
+        device: Option<&DeviceSession>,
+        id: Uuid,
+    ) -> Result<Vec<Uuid>>;
+
+    /// Bind the worker and validated public identity exactly once. The
+    /// reference store erases its working copy when the grant ends.
+    fn bind_activation(
+        &mut self,
+        workload: &Workload,
+        activation: &countersign_protocol::wire::Activate,
+        chain: &countersign_protocol::wire::PublicChain,
+        verified_at_ms: u64,
+        valid_until_ms: u64,
+    ) -> Result<()>;
+
     /// Return consent for the exact Workload binding. This is an observation of
     /// the committed decision, not an active grant lease.
     fn approved_grant(
