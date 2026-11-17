@@ -139,7 +139,7 @@ export class Session extends EventEmitter {
       this.fetches.delete(id);
       if (body.binding.approval !== approval || body.workload.user !== r.user ||
           !isDeepStrictEqual(body.binding.device, this.device) || body.expires_at_ms <= Date.now()) return;
-      const identities = await this.native.listIdentities();
+      const identities = await this.native.listIdentities(JSON.stringify(body.identity_hints ?? {}));
       if (!current() || body.expires_at_ms <= Date.now()) return;
       this.offers.set(approval, { handle: randomUUID(), body, identities });
       this.emit('changed');
@@ -199,7 +199,7 @@ export class Session extends EventEmitter {
     if (!selected || selected.expiresAtMs <= Date.now()) throw new Error('Select a valid identity.');
     // A provider-backed rediscovery must still report the same leaf. Never
     // substitute the next eligible identity if a token was removed.
-    const cert = (await this.native.listIdentities()).find(c =>
+    const cert = (await this.native.listIdentities(JSON.stringify(body.identity_hints ?? {}))).find(c =>
       c.certSha256 === selected.certSha256 && c.chain[0] === selected.chain[0]);
     if (!cert || createHash('sha256').update(Buffer.from(cert.chain[0], 'base64')).digest('base64') !== cert.certSha256)
       throw new Error('The selected identity is no longer available.');
