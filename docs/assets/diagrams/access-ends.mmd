@@ -1,0 +1,21 @@
+sequenceDiagram
+    accTitle: What happens when the desktop quits or the user revokes access
+    participant C as Companion
+    participant B as Broker
+    participant G as Gateway
+    Note over C,G: A connection already has a valid grant and traffic leases
+    rect rgb(246,242,249)
+    Note over C: User quits
+    C--xB: Signing channel closes
+    G->>B: Renew for existing traffic
+    B-->>G: Lease within grant expiry
+    Note over C,G: A fresh handshake needs the approving Companion back online
+    end
+    rect rgb(242,246,239)
+    C->>B: Request revocation once online
+    B-->>C: Revocation recorded
+    B-->>G: Retirement notice if delivered
+    G->>B: Next renewal if notice lost
+    B-->>G: Refused
+    Note over G: Close both sockets by the current lease deadline
+    end

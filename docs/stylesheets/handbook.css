@@ -1,0 +1,29 @@
+:root {
+  --md-primary-fg-color: #2b0548;
+  --md-primary-fg-color--light: #4a1a6b;
+  --md-primary-fg-color--dark: #1a0330;
+  --md-accent-fg-color: #224805;
+  --md-typeset-a-color: #442063;
+  --md-text-font: "Segoe UI", system-ui, sans-serif;
+  --md-code-font: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #2b0548;
+  --md-accent-fg-color: #a1ca7c;
+  --md-typeset-a-color: #c49bdf;
+}
+.md-typeset img[src*="/screenshots/"] {
+  display: block;
+  width: auto;
+  max-width: min(100%, 33rem);
+  max-height: 40rem;
+  margin: 1rem 0;
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+.md-typeset img[src*="/diagrams/"] {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: .25rem;
+}

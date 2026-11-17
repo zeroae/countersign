@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 415" role="img" aria-labelledby="title desc">
+  <title id="title">Countersign system architecture</title>
+  <desc id="desc">Workload TLS terminates at the Gateway. Separate mTLS connects the Gateway to the site. The backend and Gateway contact the Broker. The desktop initiates an authenticated WebSocket to the Broker and signs locally with the OS provider.</desc>
+  <defs>
+    <marker id="data" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#3d174f"/></marker>
+    <marker id="control" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#315638"/></marker>
+  </defs>
+  <style>
+    text {font-family:system-ui,sans-serif;fill:#251c2b}
+    .zone {fill:#fcfaff;stroke:#cbbfd3}
+    .desktop {fill:#f6faf5;stroke:#a8bfa6}
+    .box {fill:#fff;stroke:#7c628a}
+    .local {fill:#fff;stroke:#69836b}
+    .boundary {font-size:15px;font-weight:650}
+    .role {font-size:17px;font-weight:680}
+    .detail {font-size:13px;fill:#403748}
+    .label {font-size:13px;fill:#315638;font-weight:560}
+    .traffic {fill:none;stroke:#3d174f;stroke-width:2;marker-end:url(#data)}
+    .ctrl {fill:none;stroke:#315638;stroke-width:1.7;stroke-dasharray:5 4;marker-end:url(#control)}
+  </style>
+  <rect width="680" height="415" fill="white"/>
+  <rect class="zone" x="8" y="10" width="415" height="245" rx="10"/>
+  <text class="boundary" x="25" y="38">Integrator’s infrastructure</text>
+  <rect class="desktop" x="8" y="295" width="664" height="111" rx="10"/>
+  <text class="boundary" x="25" y="320">User’s computer</text>
+
+  <g text-anchor="middle">
+    <rect class="box" x="26" y="65" width="146" height="66" rx="6"/>
+    <text class="role" x="99" y="93">Workload</text>
+    <text class="detail" x="99" y="114">curl · Python · Node</text>
+    <rect class="box" x="234" y="65" width="168" height="66" rx="6"/>
+    <text class="role" x="318" y="93">Gateway</text>
+    <text class="detail" x="318" y="114">Traffic keys and plaintext</text>
+    <rect class="box" x="487" y="65" width="178" height="66" rx="6"/>
+    <text class="role" x="576" y="93">Protected site</text>
+    <text class="detail" x="576" y="114">Verifies client certificate</text>
+    <path class="traffic" d="M172 99H231"/>
+    <path class="traffic" d="M402 99H484"/>
+    <text class="detail" x="203" y="86">TLS</text>
+    <text class="detail" x="444" y="86">mTLS</text>
+
+    <rect class="box" x="26" y="170" width="146" height="63" rx="6"/>
+    <text class="role" x="99" y="197">Backend</text>
+    <text class="detail" x="99" y="218">Account and Context</text>
+    <rect class="box" x="234" y="170" width="168" height="63" rx="6"/>
+    <text class="role" x="318" y="197">Broker</text>
+    <text class="detail" x="318" y="218">Approvals and leases</text>
+    <path class="ctrl" d="M172 202H231"/>
+    <text class="label" x="202" y="190">Bind job</text>
+
+    <rect class="local" x="229" y="332" width="178" height="56" rx="6"/>
+    <text class="role" x="318" y="356">Companion</text>
+    <text class="detail" x="318" y="376">User reviews and approves</text>
+    <rect class="local" x="485" y="332" width="170" height="56" rx="6"/>
+    <text class="role" x="570" y="356">OS key provider</text>
+    <text class="detail" x="570" y="376">Holds client private key</text>
+    <path class="ctrl" d="M407 360H482"/>
+    <text class="label" x="445" y="350">Sign</text>
+  </g>
+  <path class="ctrl" d="M318 131V167"/>
+  <text class="label" x="330" y="154">Authorize</text>
+  <path class="ctrl" d="M318 332V236"/>
+  <text class="label" x="333" y="281">Outbound authenticated WebSocket</text>
+</svg>

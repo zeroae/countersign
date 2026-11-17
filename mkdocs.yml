@@ -1,0 +1,69 @@
+site_name: Countersign
+site_description: Desktop approval for HTTPS workloads that use an installed client certificate.
+repo_name: zeroae/countersign
+repo_url: https://github.com/zeroae/countersign
+
+theme:
+  name: material
+  logo: assets/countersign.png
+  favicon: assets/countersign.png
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Countersign: index.md
+  - Try Countersign: try.md
+  - Use the Companion: companion.md
+  - Integrate a service: integrate.md
+  - Self-host and operate: operate.md
+  - Architecture and trust: architecture.md
+  - Reference:
+      - Configuration, CLI and environment: reference/config.md
+      - Broker API: reference/api.md
+      - Widget and branding: reference/widget.md
+      - Control protocol: reference/protocol.md
+      - Tested platforms: reference/support.md
+  - Develop and release: develop.md
+
+plugins:
+  - search
+extra_css:
+  - stylesheets/handbook.css
+markdown_extensions:
+  - attr_list
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+exclude_docs: |
+  /specs/
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
