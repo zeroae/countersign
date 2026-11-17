@@ -1,6 +1,6 @@
 # Countersign design
 
-17 November 2026 · Proposed for owner approval · No implementation or platform qualification yet
+17 November 2026 · Approved for implementation · No implementation or platform qualification yet
 
 ## Intent
 
@@ -211,4 +211,16 @@ Record revision, artifact digest, mode, OS/arch, provider/version, client, site/
 - Which shared issuer templates honor the exact SAN set and short absolute validity, and which sites require CRL, OCSP or an exact additional identity URI? Qualify against actual policies before claiming interoperability.
 - What clock uncertainty, latency and queue bounds hold on supported hosts under load and after suspend? Which OS/arch artifacts have native installation and execution evidence?
 
-Owner approval of this document is the checkpoint before an implementation plan or code.
+## Implementation plan
+
+Deliver each slice through a branch and pull request into main. A passing prototype or unit suite qualifies only the behavior it exercises.
+
+| Slice | Implementation boundary | Evidence for integration |
+|---|---|---|
+| 1. Authority foundations | Establish the Cargo and pnpm workspaces. Share canonical destination and effective scope matching. Create the SQLite transaction boundary for approval decisions and the sidecar's constrained in-memory issuer. | Canonical and ambiguous authorities, exact overrides within wildcards, concurrent decisions with distinct certificates, decoded CA constraints, and exact leaf verification. Run workspace checks on pushes and PRs with macOS limited to PRs and releases. |
+| 2. Authenticated control plane | Define bounded v1 frames. Bind backend credentials and Workload generations. Add browser-confirmed pairing, device proof and fenced WSS sessions, approval fetch/decision, scoped grant activation, audit/outbox and authoritative lease endpoints. | Run two clients against the actual Broker. Race replay, approve/deny, disconnect and renewal. Verify ownership at every lookup and that unavailable storage cannot create authority. |
+| 3. Desktop identity and consent | Integrate napi-rs and the three native providers using the prototype harness. Build protected pairing stores and the Electron tray, pairing flow, certificate picker and isolated approval chrome. Add manifest caching, explicit theme review and multi-Integrator inboxes. | Test product addons and packaged applications on each claimed platform. Show two and three eligible identities, choose the last, verify its signature and prove fixture exclusion. Exercise the Linux cold-lock test separately. |
+| 4. Protected proxy path | Bind sidecar ingress to its Workload. Add per-grant child processes, downstream/egress enforcers, pinned endpoint validation, grant-aware leaf issuance, bounded rustls signing relay and exact-origin HTTP/1.1 and HTTP/2 forwarding. | Demonstrate the full curl-to-mTLS path, two principal isolation, sidecar secret isolation, negative server validation, no replay, and measured cutoff with lost pushes and stalled workers. |
+| 5. Integrator and notifications | Ship the widget, same-origin backend example, native notifications, deep-link routing, Web Push subscription/sender, Context closure and device management. Complete the Compose demo with protected upstream and native test provisioning. | Run the example in CI with the real Companion, ID-only notifications, tenant isolation, explicit deny/retry and an offline wakeup that still requires consent. |
+| 6. Shared Gateway | Reuse proxy workers with shared ingress credentials, local CA and standard ACM-PCA adapter. Add issuer stop, trust rotation, strict evidence profiles and operator recovery. | Exercise both CA sources with real leaf handshakes, issuer faults, stale evidence, two simultaneous users and worker fencing. Track live-site qualification separately. |
+| 7. Distribution | Produce matched native prebuilds, installers, tagged GHCR images and release assets. Build and install the local rattler recipe. Keep signing/notarization conditional on release credentials and owner authorization. | Smoke-test actual artifacts on the named OS/architecture, verify package contents and conda launch, and record unexecuted rows explicitly. |
