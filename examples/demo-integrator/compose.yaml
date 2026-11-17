@@ -1,0 +1,101 @@
+x-service: &service
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  user: "${CS_DEMO_UID:?run compose_demo.py}:${CS_DEMO_GID:?run compose_demo.py}"
+
+services:
+  broker:
+    <<: *service
+    image: countersign-demo/broker:local
+    build: {context: ../.., dockerfile: distribution/Dockerfile, target: broker}
+    command: [/config/broker.json]
+    volumes:
+      - ${CS_DEMO_STATE}/broker:/config:ro
+      - ${CS_DEMO_STATE}/database:/state
+    networks: [backend]
+  site:
+    <<: *service
+    image: countersign-demo/integrator:local
+    build: {context: ../.., dockerfile: examples/demo-integrator/Dockerfile}
+    command: [node, upstream.js]
+    volumes:
+      - ${CS_DEMO_STATE}/site:/demo:ro
+    networks:
+      backend:
+        aliases: [site.test]
+  integrator:
+    <<: *service
+    image: countersign-demo/integrator:local
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+      PORT: 8443
+      WORKLOAD_TOKEN_FILE: /credential/workload.jwt
+      NODE_EXTRA_CA_CERTS: /demo/ca.pem
+      INTEGRATOR_ORIGIN: https://localhost:${CS_DEMO_PORT}
+    ports: ["127.0.0.1:${CS_DEMO_PORT}:8443"]
+    volumes:
+      - ${CS_DEMO_STATE}/integrator:/demo:ro
+      - ${CS_DEMO_STATE}/credential:/credential
+    healthcheck:
+      test: [CMD, node, -e, "require('fs').accessSync('/credential/workload.jwt')"]
+      interval: 2s
+      timeout: 2s
+      retries: 25
+    networks: [backend, front]
+  gateway:
+    <<: *service
+    image: countersign-demo/gateway:local
+    build: {context: ../.., dockerfile: distribution/Dockerfile, target: gateway}
+    # Bind exclusively to the interface on the private Workload network.
+    # The untrusted upstream site shares only the backend interface.
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        set -- $$(getent ahostsv4 cs-workload-proxy)
+        test "$$#" -ge 1
+        sed "s/@WORKLOAD_IP@/$$1/" /config/gateway.json >/run/countersign/gateway.json
+        exec /usr/local/bin/countersign-gateway serve /run/countersign/gateway.json
+    tmpfs:
+      - /run/countersign:rw,noexec,nosuid,size=64k,uid=${CS_DEMO_UID},gid=${CS_DEMO_GID},mode=0700
+    # The unprivileged Gateway creates nested user/mount/network namespaces
+    # for its bubblewrap grant workers. These exceptions apply only to it.
+    security_opt: [no-new-privileges:true, seccomp=unconfined, "apparmor=${CS_DEMO_GATEWAY_PROFILE:-unconfined}"]
+    volumes:
+      - ${CS_DEMO_STATE}/gateway:/config:ro
+      - ${CS_DEMO_STATE}/credential:/credential:ro
+      - ${CS_DEMO_STATE}/public:/trust
+    networks:
+      backend: {}
+      workload:
+        aliases: [cs-workload-proxy]
+    healthcheck:
+      test: [CMD, test, -s, /trust/sidecar.pem]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+  workload:
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: '65534:65534'
+    image: curlimages/curl:8.16.0
+    entrypoint: [curl]
+    environment:
+      HTTPS_PROXY: http://gateway:8080
+      CURL_CA_BUNDLE: /trust/sidecar.pem
+      SSL_CERT_FILE: /trust/sidecar.pem
+      REQUESTS_CA_BUNDLE: /trust/sidecar.pem
+      NODE_EXTRA_CA_CERTS: /trust/sidecar.pem
+      NO_PROXY: ""
+      no_proxy: ""
+    volumes:
+      - ${CS_DEMO_STATE}/public:/trust:ro
+    networks: [workload]
+
+networks:
+  backend: {internal: true}
+  workload: {internal: true}
+  front: {}

@@ -61,8 +61,9 @@ fn point(key: &SecKey) -> NativeResult<Vec<u8>> {
 pub(crate) fn create_pairing(locator: &str) -> NativeResult<Vec<u8>> {
     let label = CFString::new(locator);
     let bits = CFNumber::from(256);
-    // Apply non-extractability specifically to the private half. The public
-    // half remains available for device proof verification and pairing.
+    // Apple's file-Keychain GetKeyParameters reads kSecAttrIsExtractable
+    // from the top-level generation dictionary for the private half. The
+    // public key is always extractable. The provider readback below verifies it.
     let attrs = unsafe {
         let private = CFDictionary::from_CFType_pairs(&[
             (
@@ -79,6 +80,10 @@ pub(crate) fn create_pairing(locator: &str) -> NativeResult<Vec<u8>> {
             ),
         ]);
         CFDictionary::from_CFType_pairs(&[
+            (
+                CFString::wrap_under_get_rule(kSecAttrIsExtractable).as_CFType(),
+                CFBoolean::false_value().as_CFType(),
+            ),
             (
                 CFString::wrap_under_get_rule(kSecAttrKeyType).as_CFType(),
                 CFString::wrap_under_get_rule(kSecAttrKeyTypeECSECPrimeRandom).as_CFType(),

@@ -24,6 +24,7 @@ static napi_value generate(napi_env env, napi_callback_info info) {
         NSDictionary *attributes = @{
             (__bridge id)kSecAttrKeyType:(__bridge id)(rsa ? kSecAttrKeyTypeRSA : kSecAttrKeyTypeECSECPrimeRandom),
             (__bridge id)kSecAttrKeySizeInBits:bits,
+            (__bridge id)kSecAttrIsExtractable:@NO,
             (__bridge id)kSecPrivateKeyAttrs:@{
                 (__bridge id)kSecAttrIsPermanent:@YES,
                 (__bridge id)kSecAttrIsExtractable:@NO,

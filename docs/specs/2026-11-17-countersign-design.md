@@ -1,6 +1,6 @@
 # Countersign design
 
-17 November 2026 · Approved for implementation · No implementation or platform qualification yet
+17 November 2026 · Approved design · Reference implementation and operating instructions below
 
 ## Intent
 
@@ -141,7 +141,7 @@ Initial admission limits per user are eight grants, 128 connections/streams of e
 |---|---|---|
 | Windows | Current user's certificate store and CNG signing provider. Build the selected public chain, respecting supported KU/EKU, issuer and schemes. | Persistent user-scoped non-exportable CNG P-256 key, with OS protection such as DPAPI for app-owned sensitive metadata. Prove restart/reopen, non-exportability and denied cold access. |
 | macOS | Security.framework identities in the user's Keychain, using SecKey signing and provider-mediated interaction. | Keychain-protected app-owned P-256 key with access control and non-exportability where supported. Prove reopen, denied access and prompt/cancel with the artifact for which support is claimed. |
-| Linux | Explicitly configured PKCS#11 providers exposed through p11-kit/NSS. Enumerate eligible installed identities and sign through token sessions. | Candidate is a persistent non-extractable NSS softoken key with a nonempty random token password in an encrypted Secret Service collection. Prove actual backend protection, unlock, persistence and locked cold reopen. **Unproven.** |
+| Linux | Explicitly configured PKCS#11 providers exposed through p11-kit/NSS. Enumerate eligible installed identities and sign through token sessions. | Candidate is a persistent non-extractable NSS softoken key with a nonempty random token password in an encrypted Secret Service collection. Prove actual backend protection, unlock, persistence and locked cold reopen. Linux ARM64 and x64 software-provider runs cover this GNOME profile. |
 
 Preserve the OS/provider's PIN, touch and unlock UI. Perform blocking operations off the JavaScript event loop on bounded native workers. Open handles can survive a keyring lock. For the Linux cold test close sessions and erase cached unlock material first. Restart both app and provider services, check identical public identity after user unlock, and fail closed on lock, cancelled unlock, missing provider or corrupt locator. In CI provision an encrypted GNOME Keyring over private session D-Bus and deliver the simulated user's unlock via an in-memory pipe. No unlock secret in argv, environment, files or logs. Other desktops, providers and hardware require their own rows. Windows and macOS qualification proceed independently of Linux.
 
@@ -191,7 +191,7 @@ GitHub Actions runs Rust fmt, clippy and tests, JS lint and tests, and native ad
 
 ## Acceptance and evidence
 
-A prior packaged Electron/napi-rs prototype at revision `232d9c9c57b055ce67bbd1fe591e1671cd35981e` passed 85 healthy TLS cases on each of four hosted systems: Windows Server 2025 x64, Windows 11 ARM64, Ubuntu 24.04 x64 and macOS 26 ARM64. This establishes native signing feasibility with the tested software providers. Reuse the platform harness and its signature-corruption and event-loop checks against the Countersign addon. Installed identity selection, Linux protected pairing-key storage and the full Countersign handshake still need product runs.
+A prior packaged Electron/napi-rs prototype at revision `232d9c9c57b055ce67bbd1fe591e1671cd35981e` passed 85 healthy TLS cases on each of four hosted systems: Windows Server 2025 x64, Windows 11 ARM64, Ubuntu 24.04 x64 and macOS 26 ARM64. This establishes native signing feasibility with the tested software providers. Reuse the platform harness and its signature-corruption and event-loop checks against the Countersign addon. The product runs below use the Countersign source and its own artifacts.
 
 | Boundary | Observable pass condition |
 |---|---|
@@ -203,7 +203,7 @@ A prior packaged Electron/napi-rs prototype at revision `232d9c9c57b055ce67bbd1f
 | Native and packages | On each claimed OS/arch, run create/reopen/proof, identity selection and a real rustls handshake through the native provider. Check event-loop responsiveness, blocked PIN dialog, cancellation, late results, hash/signature encodings and production fixture exclusion. Inspect packed installers and prebuilds. Test installed renderer sandbox and Linux encrypted storage separately from hosted software-token evidence. Verify local conda build, install and startup. |
 | Protocol and operations | Cross-version rejection, duplicate fields, oversized messages, wrong audiences and swapped scope/generation at every hop. Verify policy and trust withdrawal, stale validation, retained denial, restart/backup fencing, log redaction and cleanup. Confirm proxying never falls back after a protected failure. |
 
-Record revision, artifact digest, mode, OS/arch, provider/version, client, site/trust profile, test action and observed result, including skipped/failed cases. A compiled addon, a fixture signature, a packaged installer and a real desktop/site handshake each establish different facts. In particular, Linux protected storage, installed login prompts, physical tokens, real-site acceptance, live ACM-PCA-compatible issuers, measured cutoff and shared deployment isolation remain unproven.
+Record revision, artifact digest, mode, OS/arch, provider/version, client, site/trust profile, test action and observed result, including skipped/failed cases. A compiled addon, a fixture signature, a packaged installer and a real desktop/site handshake each establish different facts. The reference tests cover a specific encrypted GNOME Keyring, software providers and controlled endpoint, worker and clock failures. Production timings, physical token interactions, real-site acceptance and live issuer compatibility require deployment-specific qualification.
 
 ## Open questions for qualification
 
@@ -213,7 +213,7 @@ Record revision, artifact digest, mode, OS/arch, provider/version, client, site/
 
 ## Implementation plan
 
-Deliver each slice through a branch and pull request into main. A passing prototype or unit suite qualifies only the behavior it exercises.
+Deliver the slices together on one implementation branch and one pull request into main. A passing prototype or unit suite qualifies only the behavior it exercises.
 
 | Slice | Implementation boundary | Evidence for integration |
 |---|---|---|
@@ -224,3 +224,78 @@ Deliver each slice through a branch and pull request into main. A passing protot
 | 5. Integrator and notifications | Ship the widget, same-origin backend example, native notifications, deep-link routing, Web Push subscription/sender, Context closure and device management. Complete the Compose demo with protected upstream and native test provisioning. | Run the example in CI with the real Companion, ID-only notifications, tenant isolation, explicit deny/retry and an offline wakeup that still requires consent. |
 | 6. Shared Gateway | Reuse proxy workers with shared ingress credentials, local CA and standard ACM-PCA adapter. Add issuer stop, trust rotation, strict evidence profiles and operator recovery. | Exercise both CA sources with real leaf handshakes, issuer faults, stale evidence, two simultaneous users and worker fencing. Track live-site qualification separately. |
 | 7. Distribution | Produce matched native prebuilds, installers, tagged GHCR images and release assets. Build and install the local rattler recipe. Keep signing/notarization conditional on release credentials and owner authorization. | Smoke-test actual artifacts on the named OS/architecture, verify package contents and conda launch, and record unexecuted rows explicitly. |
+
+## Run the reference implementation
+
+The desktop can run on Linux, macOS or Windows. The Gateway requires Linux with bubblewrap and unprivileged user namespaces. The Broker uses a single owning process per SQLite database. Use Node 24, the repository’s pinned Rust toolchain, and pnpm 10.28.2. On Debian-family systems install the NSS development libraries before building the addon.
+
+```sh
+pnpm install --frozen-lockfile
+cargo build --workspace --locked
+node scripts/native-package.mjs debug
+pnpm --filter @countersign/companion exec electron-builder --dir --publish never
+```
+
+### Try curl and the certificate picker
+
+The interactive example runs the Integrator, Broker, protected site, Gateway and curl in Docker Compose. The Companion and a disposable Chromium profile run in the Linux desktop session. The launcher creates a private D-Bus session, encrypted GNOME Keyring, SoftHSM token and separate infrastructure and client CAs. The Workload container gets a read-only directory with the sidecar’s public CA. Use a Linux GUI session with Docker Compose, Chromium, bubblewrap, GNOME Keyring, libsecret tools, SoftHSM2, the NSS tools, and Python. On Ubuntu with restricted user namespaces, the launcher uses sudo to install and remove a temporary AppArmor profile for the demo. Run from the repository root.
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r examples/demo-integrator/test/fixture-requirements.txt
+.venv/bin/python examples/demo-integrator/compose_demo.py \
+  --app /absolute/path/to/countersign-companion --browser /absolute/path/to/chromium
+```
+
+Enter the printed HTTPS origin in the Companion. Sign in using the temporary login secret file identified by the launcher, enter the pairing code in the browser, then confirm the account in the Companion. Type `curl` at the launcher prompt to start a request. Choose one of the identically named certificates by its fingerprint and approve. The site returns the fingerprint it observed during mTLS. Type `quit` to close the demo. For automation, `--verify` drives the browser and Companion. The separate Linux CI test uses Xvfb and runs curl as another OS user. [Interactive launcher](../../examples/demo-integrator/compose_demo.py) · [CI setup and commands](../../.github/workflows/e2e.yml)
+
+### Configure an Integrator
+
+1. Give the Broker a TLS server certificate, key, SQLite path, independent backend credential, Workload HMAC key and client trust anchors. Set `origin` to the public Integrator authority including its port. Set `listen` to the private listening address. Publish the exact WebSocket path `/v1/companion` under the Integrator HTTPS origin. Forward WebSocket upgrades with the `countersign.v1` subprotocol. Keep backend, admin and Gateway endpoints on authenticated service paths.
+2. Serve `/.well-known/countersign.json` over HTTPS. A minimal manifest is `{"version":1,"displayName":"Example","colors":{"accent":"#164e63","background":"#ffffff"}}`. Optional fields are `copy` and a same-origin PNG `logo` URL. The Companion pins the origin at pairing and asks the user to accept later branding changes.
+3. Register destinations in both processes with matching IDs, versions and patterns. For group approval set `whole_wildcard: true` in the Broker and `approval: "whole_wildcard"` in the Gateway. The default is one exact destination. Each Gateway entry has a `roots` PEM path for upstream server authentication. Internal destinations require an exact entry and explicit `private_networks` prefixes. Broker `client_ca_file` supplies the default client trust. Per-entry `client_trust` accepts `ca_file`, `user_fingerprints` and a revocation profile. The Gateway also accepts a per-entry `revocation` profile. CRL and OCSP files are bounded administrator-imported DER objects.
+4. Start the Broker with `countersign-broker broker.json`. Authenticate users in the Integrator. The backend mints short-lived Workload credentials by posting the server-derived binding to `/v1/backend/workloads`. Write the token to the Gateway's protected credential path and refresh that file atomically. Put the sidecar listener on an endpoint reachable exclusively by its Workload.
+5. Run `countersign-gateway serve gateway.json`. Deliver the four exports from `countersign-gateway env gateway.json` to the Workload. Mount the public CA at the same path read-only. On changes to destination rules, retire existing authority, update the version in both service configurations, and restart the sidecar.
+6. Load the web component in the authenticated site and set its `adapter`. The required `pair()` starts the pairing flow and `connect()` returns a request ID from the backend. Optional `subscribe()` registers site Web Push on a user gesture. To enable Web Push, configure Broker `web_push` with an exact `allowed_hosts` list, a `mailto:` contact and a private `vapid_key_file` containing a base64url-encoded 32-byte P-256 scalar. Supply the matching public application-server key to the site's PushManager. Delete the subscription on logout. [Example adapter and session handling](../../examples/demo-integrator/site/app.js) · [Reference backend](../../examples/demo-integrator/integrator.js)
+
+The example launcher constructs complete Broker and Gateway JSON configurations with fresh deployment-specific values. The Rust config types define all supported fields. [Broker config](../../crates/countersign-broker/src/config.rs) · [Gateway config](../../crates/countersign-gateway/src/runtime/config.rs)
+
+**Shared Gateway.** Configure `shared.listener_cert`, `shared.listener_key`, `shared.gateway_token` and `shared.ca`. Omit the sidecar's `workload` and `workload_token` fields. Supply an HTTPS proxy URL. The Integrator backend requests `mode: "shared"` credentials and the Workload or its private adapter sends a single `Proxy-Authorization: Bearer` header on the encrypted proxy connection. For a local CA, use `{"type":"local","cert":"/run/issuer/chain.pem","key":"/run/issuer/key.pem"}`. Place the issuer first and trusted root last in that certificate bundle. For remote issuance, use the standard AWS SDK configuration below. Set the authority and template to values supported by your issuer. Select a signing algorithm that matches its CA. The template must issue an exact-host server leaf within the absolute expiry. A backend adding a single required URI SAN can be configured with `expected_uri`.
+
+```json
+{
+  "type": "acm_pca",
+  "region": "us-east-1",
+  "profile": "proxy-issuer",
+  "ca_arn": "<issuer authority identifier>",
+  "template": "<issuer template identifier>",
+  "signing_algorithm": "SHA256WITHECDSA",
+  "roots": "/run/issuer/roots.pem"
+}
+```
+
+An explicit HTTPS `endpoint` overrides SDK endpoint discovery. The shared AWS profile can supply a credential process and a named `services` block with an `acm_pca.endpoint_url` entry. The worker receives validated public leaves and holds its own leaf private key. The supervisor owns issuer credentials. [Issuer implementation and SDK fixture](../../crates/countersign-gateway/src/shared_issuer.rs) · [ZAE-ZCM profile example](https://github.com/zeroae/zae-zcm#configure-a-profile)
+
+**Device and grant operations.** The backend uses a private Bearer service credential for `/v1/backend/*`. The browser receives a session cookie and a CSRF token. Derive the user and Context before calling `pairings/confirm`, `requests`, `status`, `renew`, `revoke`, `devices`, `pairings/forget`, `contexts/close` or `workloads/retire`. Status distinguishes the approval outcome, current Companion readiness and historical upstream mTLS acceptance. The assigned Companion can queue revocation offline and checks the authenticated Broker acknowledgment on reconnect. Issued leases bound the remaining forwarding interval. Administrative `/v1/admin/control` accepts account blocks, per-user destination denials, issuer stop and emergency stop with an independent admin credential. The default audit retention is 30 days. [Service routes](../../crates/countersign-broker/src/service/mod.rs) · [Control formats](../../crates/countersign-broker/src/service/controls.rs)
+
+**Recovery.** Stop the Broker before restoring a SQLite backup, then run `countersign-broker --recover-backup broker.json`. This invalidates prior device and Workload authority and places the service under emergency stop. Reconcile current permissions and revoked users before clearing the stop. Users re-pair and obtain fresh approvals. A normal Broker restart also requires fresh Workload credentials. [Maintenance and recovery](../../crates/countersign-broker/src/service/maintenance.rs)
+
+**Linux desktop.** Configure website tokens via p11-kit, or point `COUNTERSIGN_PKCS11_MODULE` to the absolute path of the operator-selected module. Tokens with a protected authentication path own their prompt. The software-token integration retrieves its unlock credential from the encrypted login collection using attributes `application=Countersign`, `kind=website-token`, `token=<token label>`. Pairing uses non-extractable NSS keys with a separate random unlock secret. “Start at login” is available in the packaged Companion.
+
+### Build and install a local conda package
+
+From the repository root on Linux, supply an output directory outside the checkout. The recipe packages Electron and its matching native addon. The installed `countersign-companion` launcher uses the desktop session’s display and credential services.
+
+```sh
+rattler-build build --recipe recipe/recipe.yaml --output-dir "$HOME/.cache/countersign-conda-output" -c conda-forge
+conda create -n countersign-local -c "file://$HOME/.cache/countersign-conda-output" -c conda-forge countersign-companion
+conda run -n countersign-local countersign-companion
+```
+
+The recipe records the current project license as undeclared. A future staged-recipes submission needs the owner's license decision and an immutable release source with its hash. [Local recipe](../../recipe/recipe.yaml)
+
+### Qualification evidence
+
+- On Linux ARM64 the packaged Electron app displayed two and three installed, identically named SoftHSM certificates. In both cases Approve required a selection. curl ran as another OS user, the site verified the selected certificate fingerprint, and authenticated revocation denied the next request. A separate run installed the local conda package and completed the two-certificate mTLS flow.
+- A local Linux ARM64 Docker Compose run drove real browser sign-in, confirmed the pairing in the packaged Companion, and matched the selected fingerprint at the site through a separate curl container. The shared and sidecar Gateway tests exercise separate worker processes, distinct client identities for concurrent users, authority checks, socket closure and expiry with blocked workers. SDK tests check signed Issue/Get requests, delayed availability, exact certificate contents and a completed TLS handshake with the returned certificate. These tests use local issuers. [Gateway integration](../../crates/countersign-gateway/tests/runtime.py)
+- Hosted native jobs exercise keys on the named runner and test software provider. Refer to each workflow's job results for the checked revision. Physical tokens, real sites, live CA services, release code signing, installed OS-specific PIN dialogs and production shared deployments require separate qualification. [Native runs](https://github.com/zeroae/countersign/actions/workflows/native.yml) · [Desktop and image builds](https://github.com/zeroae/countersign/actions/workflows/distribution.yml)

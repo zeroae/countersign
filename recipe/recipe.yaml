@@ -34,6 +34,26 @@ requirements:
     - gtk3
     - alsa-lib
     - p11-kit
+    - libglib
+    - atk-1.0
+    - at-spi2-atk
+    - at-spi2-core
+    - libcups
+    - dbus
+    - cairo
+    - libpango
+    - libgbm
+    - libudev1
+    - libexpat
+    - libgcc
+    - libxcb
+    - libxkbcommon
+    - xorg-libx11
+    - xorg-libxcomposite
+    - xorg-libxdamage
+    - xorg-libxext
+    - xorg-libxfixes
+    - xorg-libxrandr
 
 tests:
   - script:

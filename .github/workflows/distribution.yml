@@ -57,6 +57,23 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm --filter @countersign/companion package --config.forceCodeSigning=true --config.mac.notarize=true
+      - name: Load the packaged addon with its bundled Electron runtime
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, subprocess, sys
+          dist = Path("packages/companion/dist")
+          [addon] = dist.glob("**/app.asar.unpacked/native/countersign-native.node")
+          bundle = addon.resolve().parents[3]
+          if sys.platform == "darwin":
+              executable = bundle / "MacOS" / "Countersign"
+          elif sys.platform == "win32":
+              executable = bundle / "Countersign.exe"
+          else:
+              executable = bundle / "countersign-companion"
+          probe = "const a=require(process.argv[1]); if(typeof a.signTls!=='function'||typeof a.listIdentities!=='function')process.exit(1); console.log(process.versions.electron,process.arch)"
+          subprocess.run([str(executable), "-e", probe, str(addon.resolve())],
+                         env=dict(os.environ, ELECTRON_RUN_AS_NODE="1"), check=True, timeout=45)
       - name: Name the native prebuild
         shell: bash
         run: cp packages/companion/native/countersign-native.node countersign-native-${{ matrix.os }}-${{ matrix.arch }}.node
@@ -69,7 +86,7 @@ jobs:
             packages/companion/dist/*.deb
             packages/companion/dist/*.AppImage
             packages/companion/dist/*.exe
-            packages/companion/dist/*.dmg
+            packages/companion/dist/*.pkg
 
   images:
     strategy:

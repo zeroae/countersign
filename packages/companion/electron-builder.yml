@@ -26,7 +26,7 @@ linux:
 mac:
   category: public.app-category.utilities
   icon: assets/icon.png
-  target: dmg
+  target: pkg
 win:
   icon: assets/icon.png
   target: nsis

@@ -1166,10 +1166,12 @@ name = "countersign-gateway"
 version = "0.1.0"
 dependencies = [
  "aws-config",
+ "aws-runtime",
  "aws-sdk-acmpca",
  "aws-smithy-http-client",
  "aws-smithy-json",
  "aws-smithy-types",
+ "aws-types",
  "base64 0.22.1",
  "bytes",
  "countersign-pki",

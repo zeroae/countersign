@@ -63,6 +63,39 @@ pub struct SharedIssuer {
     expected_uri: Option<String>,
 }
 
+async fn issuer_client(
+    loader: aws_config::ConfigLoader,
+    endpoint: Option<&str>,
+) -> Result<Client, Failure> {
+    let config = loader.load().await;
+    let mut builder =
+        aws_sdk_acmpca::config::Builder::from(&config).protocol(AwsJsonRpcProtocol::aws_json_1_1());
+    // The shared AWS config spells this service key acm_pca. The pinned
+    // SDK otherwise normalizes "ACM PCA" to acm-pca in a services block.
+    let service_key = aws_types::service_config::ServiceConfigKey::builder()
+        .service_id("ACM_PCA")
+        .env("AWS_ENDPOINT_URL")
+        .profile("endpoint_url")
+        .build()?;
+    let configured = config
+        .service_config()
+        .and_then(|source| source.load_config(service_key));
+    if let Some(endpoint) = endpoint.or(configured.as_deref()) {
+        let url = reqwest::Url::parse(endpoint)?;
+        if url.scheme() != "https"
+            || url.host().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err("expected an HTTPS issuer endpoint".into());
+        }
+        builder = builder.endpoint_url(endpoint);
+    }
+    Ok(Client::from_conf(builder.build()))
+}
+
 impl SharedIssuer {
     pub async fn open(config: SharedCaSource, policy: DestinationPolicy) -> Result<Self, Failure> {
         let mut roots = RootCertStore::empty();
@@ -107,18 +140,10 @@ impl SharedIssuer {
                 if let Some(name) = profile {
                     loader = loader.profile_name(name);
                 }
-                let config = loader.load().await;
-                let mut builder = aws_sdk_acmpca::config::Builder::from(&config)
-                    .protocol(AwsJsonRpcProtocol::aws_json_1_1());
-                if let Some(url) = endpoint {
-                    if !url.starts_with("https://") {
-                        return Err("expected HTTPS issuer endpoint".into());
-                    }
-                    builder = builder.endpoint_url(url);
-                }
+                let client = issuer_client(loader, endpoint.as_deref()).await?;
                 expected_uri = uri;
                 Source::Remote {
-                    client: Client::from_conf(builder.build()),
+                    client,
                     ca: ca_arn,
                     template,
                     algorithm: SigningAlgorithm::from(signing_algorithm.as_str()),
@@ -499,6 +524,48 @@ mod tests {
         site.tls(chain);
         fs::write(key, KeyPair::generate().unwrap().serialize_pem()).unwrap();
         assert!(SharedIssuer::open(source, site.policy).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn shared_profile_selects_acm_pca_service_endpoint() {
+        use aws_runtime::env_config::file::{EnvConfigFileKind, EnvConfigFiles};
+        const PROFILE: &str = "[profile proxy]\nregion=us-east-1\nservices=local\n\n[services local]\nacm_pca =\n  endpoint_url = https://issuer.example/\n";
+        for (explicit, target) in [
+            (None, "https://issuer.example/"),
+            (
+                Some("https://override.example"),
+                "https://override.example/",
+            ),
+        ] {
+            let http = StaticReplayClient::new(vec![ReplayEvent::new(
+                hyper::http::Request::builder()
+                    .uri(target)
+                    .body(SdkBody::empty())
+                    .unwrap(),
+                hyper::http::Response::builder()
+                    .status(200)
+                    .body(SdkBody::from("{}"))
+                    .unwrap(),
+            )]);
+            let files = EnvConfigFiles::builder()
+                .with_contents(EnvConfigFileKind::Config, PROFILE)
+                .build();
+            let loader = aws_config::defaults(BehaviorVersion::latest())
+                .profile_files(files)
+                .profile_name("proxy")
+                .http_client(http.clone())
+                .credentials_provider(Credentials::new(
+                    "fixture", "fixture", None, None, "fixture",
+                ));
+            let client = issuer_client(loader, explicit).await.unwrap();
+            client
+                .describe_certificate_authority()
+                .certificate_authority_arn(CA)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(http.actual_requests().next().unwrap().uri(), target);
+        }
     }
 
     #[tokio::test]
