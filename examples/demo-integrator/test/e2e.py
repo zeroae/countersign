@@ -54,7 +54,7 @@ def run(directory, app, count):
         s.connect(('192.0.2.1',9))
         local_ip=s.getsockname()[0]
     hosts=private/'hosts'
-    hosts.write_text(Path('/etc/hosts').read_text()+'\n'+local_ip+' site.test\n')
+    hosts.write_text('127.0.0.1 localhost\n'+local_ip+' site.test\n')
     dest=dict(id='demo-site',version=1,pattern='site.test:9444')
     binding=dict(integrator='demo',user='demo-user',context='demo-context',workload='demo-curl',workload_generation=1)
     broker_config=dict(origin=f'localhost:{ui_port}',listen=f'127.0.0.1:{broker_port}',integrator='demo',

@@ -48,14 +48,12 @@ def provision(directory):
         module = prepare.install_identities(directory, (authority,issuer), 3)
         os.environ["COUNTERSIGN_PKCS11_MODULE"] = str(module)
         return json.loads((directory/"fingerprints.json").read_text())
-    if sys.platform == "darwin":
-        run("clang","-fobjc-arc","-Wno-deprecated-declarations",str(HERE/"macos-key.m"),
-            "-framework","Security","-framework","Foundation","-o",str(directory/"gen"))
     result = []
     for _ in range(3):
         name = "CountersignCI-"+uuid.uuid4().hex
         if sys.platform == "darwin":
-            point=run(str(directory/"gen"),name,shutil.which("node"),capture_output=True).stdout
+            point=run("node","-e","process.stdout.write(require(process.argv[1]).generateWebsiteKey(process.argv[2]))",
+                      str(directory/"macos-fixture.node"),name,capture_output=True).stdout
             public=ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(),base64.b64decode(point))
         else:
             der=run("pwsh","-NoProfile","-File",str(HERE/"windows-key.ps1"),"generate",name,capture_output=True).stdout
@@ -74,6 +72,10 @@ def test(directory, addon):
         run("gnome-keyring-daemon","--unlock","--components=secrets",
             input=sys.stdin.buffer.read(), stdout=subprocess.DEVNULL)
     elif sys.platform == "darwin":
+        node_headers=Path(shutil.which("node")).resolve().parent.parent/"include/node"
+        run("clang","-bundle","-undefined","dynamic_lookup","-fobjc-arc","-Wno-deprecated-declarations",
+            "-I"+str(node_headers),str(HERE/"macos-key.m"),"-framework","Security","-framework","Foundation",
+            "-o",str(directory/"macos-fixture.node"))
         # On this fresh CI user, use a dedicated keychain for both enrollment and installed fixtures.
         path = str(directory/"ci.keychain-db")
         password = secrets.token_hex(32)
@@ -82,10 +84,21 @@ def test(directory, addon):
         run("security","default-keychain","-d","user","-s",path)
         run("security","unlock-keychain","-p",password,path)
     for stage in ("create","reopen","retire"):
-        run("node",str(HERE/"addon.cjs"),str(addon),stage,str(directory/"pairing-public.json"))
+        record = directory/"pairing-public.json"
+        run("node",str(HERE/"addon.cjs"),str(addon),stage,str(record))
+        if stage == "create" and sys.platform=="darwin":
+            guard = directory/"macos-fixture.node"
+            run("security","lock-keychain",path)
+            run("node",str(HERE/"addon.cjs"),str(addon),"locked",str(record),str(guard))
+            run("security","unlock-keychain","-p",password,path)
+        if stage == "create" and sys.platform=="win32":
+            run("pwsh","-NoProfile","-File",str(HERE/"windows-cold.ps1"),str(addon),
+                str(HERE/"addon.cjs"),str(record))
     identities = provision(directory)
     env=dict(os.environ,COUNTERSIGN_CI_ADDON=str(addon),COUNTERSIGN_CI_FINGERPRINTS=json.dumps(identities),
              COUNTERSIGN_CI_CLIENT_ROOT=str(directory/"ca.der"))
+    if sys.platform == "darwin":
+        env["COUNTERSIGN_CI_NO_UI"] = str(directory/"macos-fixture.node")
     run("cargo","test","--locked","-p","countersign-native","--test","native_mtls","--","--ignored","--nocapture",env=env)
 
 def main():
@@ -94,6 +107,11 @@ def main():
         return
     addon=Path(sys.argv[1]).resolve()
     assert addon.suffix == ".node"
+    binary = addon.read_bytes()
+    for forbidden in (b"installFixtureKey", b"activateFixtureScope", b"fixtureSign", b"exportPrivateKey",
+                      b"genericSignBytes", b"generateWebsiteKey", b"COUNTERSIGN_CI_NO_UI", b"COUNTERSIGN_CI_CLIENT_ROOT", b"COUNTERSIGN_CI_FINGERPRINTS"):
+        if forbidden in binary:
+            raise RuntimeError("fixture or general-signing entry point in product artifact")
     with tempfile.TemporaryDirectory(prefix="cs-native-") as tmp:
         directory=Path(tmp)
         if sys.platform=="linux":

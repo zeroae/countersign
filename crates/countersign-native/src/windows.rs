@@ -42,7 +42,30 @@ fn pairing(locator: &str) -> NativeResult<Handle> {
         unsafe { NCryptOpenKey(provider.0, &mut key, wide(locator).as_ptr(), 0, 0) },
         "reopen pairing credential",
     )?;
-    Ok(Handle(key))
+    let key = Handle(key);
+    check_protection(key.0)?;
+    Ok(key)
+}
+fn check_protection(key: usize) -> NativeResult<()> {
+    let mut policy = [0u8; 4];
+    let mut len = 0;
+    check(
+        unsafe {
+            NCryptGetProperty(
+                key,
+                NCRYPT_EXPORT_POLICY_PROPERTY,
+                policy.as_mut_ptr(),
+                4,
+                &mut len,
+                0,
+            )
+        },
+        "verify pairing key export policy",
+    )?;
+    if len != 4 || u32::from_le_bytes(policy) != 0 {
+        return Err("CNG pairing key allows export".into());
+    }
+    Ok(())
 }
 fn public(key: usize) -> NativeResult<Vec<u8>> {
     // A P-256 BCRYPT_ECCPUBLIC_BLOB contains an 8-byte header and the 64 public point bytes.
@@ -115,6 +138,14 @@ pub(crate) fn create_pairing(locator: &str) -> NativeResult<Vec<u8>> {
         unsafe { NCryptFinalizeKey(key.0, 0) },
         "persist protected credential",
     )?;
+    if let Err(err) = check_protection(key.0) {
+        // Only delete the newly generated app-owned object.
+        let mut key = key;
+        if unsafe { NCryptDeleteKey(key.0, 0) } == 0 {
+            key.0 = 0;
+        }
+        return Err(err);
+    }
     public(key.0)
 }
 pub(crate) fn pairing_public(locator: &str) -> NativeResult<Vec<u8>> {

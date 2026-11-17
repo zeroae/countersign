@@ -186,6 +186,7 @@ struct Active {
     binding: GrantBinding,
     selected: Arc<Selection>,
     expires_at_ms: u64,
+    expires: Instant,
     used: HashMap<String, u64>,
 }
 type GrantKey = (Id, Id);
@@ -219,24 +220,8 @@ fn eligible(der: &[u8]) -> NativeResult<(String, String, i64)> {
     {
         return Err("ineligible certificate".into());
     }
-    match c.public_key().parsed().map_err(|_| "ineligible key")? {
-        PublicKey::RSA(r) if r.key_size() >= 2048 => (),
-        PublicKey::EC(_) => {
-            let curve = c
-                .public_key()
-                .algorithm
-                .parameters
-                .as_ref()
-                .and_then(|p| p.as_oid().ok())
-                .map(|oid| oid.to_id_string());
-            if !matches!(
-                curve.as_deref(),
-                Some("1.2.840.10045.3.1.7" | "1.3.132.0.34")
-            ) {
-                return Err("unsupported curve".into());
-            }
-        }
-        _ => return Err("ineligible key".into()),
+    if supported_schemes(&c)?.is_empty() {
+        return Err("ineligible key".into());
     }
     Ok((
         c.subject().to_string(),
@@ -245,25 +230,115 @@ fn eligible(der: &[u8]) -> NativeResult<(String, String, i64)> {
     ))
 }
 
+fn supported_schemes(leaf: &X509Certificate<'_>) -> NativeResult<&'static [SignatureScheme]> {
+    use SignatureScheme::*;
+    match leaf.public_key().parsed().map_err(|_| "ineligible key")? {
+        PublicKey::RSA(key) if (2048..=8192).contains(&key.key_size()) => Ok(&[
+            RsaPssSha256,
+            RsaPssSha384,
+            RsaPssSha512,
+            RsaPkcs1Sha256,
+            RsaPkcs1Sha384,
+            RsaPkcs1Sha512,
+        ]),
+        PublicKey::EC(_) => {
+            let curve = leaf
+                .public_key()
+                .algorithm
+                .parameters
+                .as_ref()
+                .and_then(|param| param.as_oid().ok())
+                .map(|oid| oid.to_id_string());
+            Ok(match curve.as_deref() {
+                Some("1.2.840.10045.3.1.7") => &[EcdsaNistp256Sha256],
+                Some("1.3.132.0.34") => &[EcdsaNistp384Sha384],
+                _ => &[],
+            })
+        }
+        _ => Ok(&[]),
+    }
+}
+
+fn matches_hints(hints: &IdentityHints, chain: &[Vec<u8>], fingerprint: &Fingerprint) -> bool {
+    if hints
+        .cert_fingerprints
+        .as_ref()
+        .is_some_and(|allowed| !allowed.contains(fingerprint))
+    {
+        return false;
+    }
+    if !hints.signature_schemes.is_empty() {
+        let Some((_, leaf)) = chain
+            .first()
+            .and_then(|der| X509Certificate::from_der(der).ok())
+        else {
+            return false;
+        };
+        if !supported_schemes(&leaf)
+            .is_ok_and(|schemes| schemes.iter().any(|s| hints.signature_schemes.contains(s)))
+        {
+            return false;
+        }
+    }
+    hints.issuer_names.is_empty()
+        || chain.iter().any(|der| {
+            X509Certificate::from_der(der).is_ok_and(|(_, cert)| {
+                hints
+                    .issuer_names
+                    .iter()
+                    .any(|name| name.as_slice() == cert.issuer().as_raw())
+            })
+        })
+}
+
 #[napi]
-pub async fn list_identities() -> napi::Result<Vec<Value>> {
-    native(||{
-        let identities=platform::identities()?;
-        let mut choices=Vec::new();
-        let mut st=STATE.lock().map_err(|_|"state unavailable")?;
-        st.selections.retain(|_,s|s.expires>Instant::now());
+pub async fn list_identities(hints_json: Option<String>) -> napi::Result<Vec<Value>> {
+    native(move || {
+        let hints: IdentityHints = match hints_json {
+            None => IdentityHints::default(),
+            Some(json) if json.len() <= MAX_FRAME_BYTES => {
+                serde_json::from_str(&json).map_err(|_| "invalid identity constraints")?
+            }
+            _ => return Err("oversized identity constraints".into()),
+        };
+        let identities = platform::identities()?;
+        let mut choices = Vec::new();
+        let mut st = STATE.lock().map_err(|_| "state unavailable")?;
+        st.selections.retain(|_, s| s.expires > Instant::now());
         for identity in identities {
-            let Some(leaf)=identity.chain.first() else{continue};
-            let Ok((subject,issuer,expires_at_ms))=eligible(leaf) else{continue};
-            let Ok(chain)=PublicChain::new(identity.chain.clone()) else{continue};
-            let cert_sha256=Fingerprint::new(Sha256::digest(leaf).into());
-            let selection=random_id()?;
-            choices.push(json!({"selection":selection,"subject":subject,"issuer":issuer,"expiresAtMs":expires_at_ms,"certSha256":cert_sha256,"chain":chain}));
-            if st.selections.len()>=4096{return Err("identity selection limit reached".into())}
-            st.selections.insert(selection,Arc::new(Selection{identity,fingerprint:cert_sha256,expires:Instant::now()+Duration::from_secs(600)}));
+            let Some(leaf) = identity.chain.first() else {
+                continue;
+            };
+            let Ok((subject, issuer, expires_at_ms)) = eligible(leaf) else {
+                continue;
+            };
+            let cert_sha256 = Fingerprint::new(Sha256::digest(leaf).into());
+            if !matches_hints(&hints, &identity.chain, &cert_sha256) {
+                continue;
+            }
+            let Ok(chain) = PublicChain::new(identity.chain.clone()) else {
+                continue;
+            };
+            if st.selections.len() >= 4096 {
+                return Err("identity selection limit reached".into());
+            }
+            let selection = random_id()?;
+            choices.push(json!({
+                "selection": selection, "subject": subject, "issuer": issuer,
+                "expiresAtMs": expires_at_ms, "certSha256": cert_sha256, "chain": chain,
+            }));
+            st.selections.insert(
+                selection,
+                Arc::new(Selection {
+                    identity,
+                    fingerprint: cert_sha256,
+                    expires: Instant::now() + Duration::from_secs(600),
+                }),
+            );
         }
         Ok(choices)
-    }).await
+    })
+    .await
 }
 
 #[napi]
@@ -290,7 +365,12 @@ pub fn activate_scope(activation_json: String, selection: String) -> napi::Resul
     {
         return Err(napi::Error::from_reason("selection or grant mismatch"));
     }
-    st.active.retain(|_, a| a.expires_at_ms > now);
+    let started = Instant::now();
+    let expires = started
+        .checked_add(Duration::from_millis(activation.expires_at_ms - now))
+        .ok_or_else(|| napi::Error::from_reason("invalid grant lifetime"))?;
+    st.active
+        .retain(|_, a| a.expires_at_ms > now && a.expires > started);
     if st.active.contains_key(&grant_key(&activation.grant)) || st.active.len() >= 256 {
         return Err(napi::Error::from_reason("grant slot unavailable"));
     }
@@ -300,6 +380,7 @@ pub fn activate_scope(activation_json: String, selection: String) -> napi::Resul
             binding: activation.grant,
             selected,
             expires_at_ms: activation.expires_at_ms,
+            expires,
             used: HashMap::new(),
         },
     );
@@ -369,7 +450,8 @@ pub async fn sign_tls(sign_json: String) -> napi::Result<String> {
             .active
             .get_mut(&grant)
             .ok_or_else(|| napi::Error::from_reason("inactive grant"))?;
-        if request.binding.grant != active.binding
+        if active.expires <= Instant::now()
+            || request.binding.grant != active.binding
             || !active
                 .binding
                 .scope
@@ -396,9 +478,13 @@ pub async fn sign_tls(sign_json: String) -> napi::Result<String> {
     let key = operation.clone();
     let result = native(move || {
         ensure_current(&key, request.deadline_ms)?;
-        check_transcript(&request)?;
         let cert = &selection.identity.chain[0];
         eligible(cert)?;
+        let (_, leaf) = X509Certificate::from_der(cert).map_err(|_| "invalid selected leaf")?;
+        if !supported_schemes(&leaf)?.contains(&request.scheme) {
+            return Err("scheme incompatible with selected key".into());
+        }
+        check_transcript(&request, cert)?;
         let signature = platform::sign_identity(
             &selection.identity,
             request.scheme,
@@ -416,19 +502,65 @@ pub async fn sign_tls(sign_json: String) -> napi::Result<String> {
     result
 }
 fn ensure_current(op: &OperationKey, deadline: u64) -> NativeResult<()> {
-    if !STATE
-        .lock()
-        .map_err(|_| "state unavailable")?
+    let state = STATE.lock().map_err(|_| "state unavailable")?;
+    if !state
         .pending
         .get(op)
         .is_some_and(|(_, cancelled)| !*cancelled)
+        || !state
+            .active
+            .get(&op.0)
+            .is_some_and(|grant| grant.expires > Instant::now())
         || clock_ms()? >= deadline
     {
         return Err("operation cancelled or expired".into());
     }
     Ok(())
 }
-fn check_transcript(req: &Sign) -> NativeResult<()> {
+/// Read a TLS vector with a 1- or 2-byte length prefix.
+fn vector<'a>(input: &mut &'a [u8], width: usize) -> Option<&'a [u8]> {
+    let n = match width {
+        1 => *input.first()? as usize,
+        2 => u16::from_be_bytes(input.get(..2)?.try_into().ok()?) as usize,
+        _ => return None,
+    };
+    let value = input.get(width..width + n)?;
+    *input = &input[width + n..];
+    Some(value)
+}
+
+fn tls12_sni(hello: &[u8]) -> Option<&[u8]> {
+    // legacy_version, random, session_id, cipher_suites, compression_methods.
+    let mut bytes = hello.get(34..)?;
+    vector(&mut bytes, 1)?;
+    vector(&mut bytes, 2)?;
+    vector(&mut bytes, 1)?;
+    let mut extensions = vector(&mut bytes, 2)?;
+    if !bytes.is_empty() {
+        return None;
+    }
+    let mut sni = None;
+    while !extensions.is_empty() {
+        let typ = extensions.get(..2)?;
+        extensions = &extensions[2..];
+        let mut data = vector(&mut extensions, 2)?;
+        if typ != [0, 0] {
+            continue;
+        }
+        let mut names = vector(&mut data, 2)?;
+        if !data.is_empty() || sni.is_some() || names.first()? != &0 {
+            return None;
+        }
+        names = &names[1..];
+        sni = Some(vector(&mut names, 2)?);
+        if !names.is_empty() {
+            return None;
+        }
+    }
+    sni
+}
+
+fn check_transcript(req: &Sign, leaf: &[u8]) -> NativeResult<()> {
     let bytes = req.certificate_verify.as_slice();
     match req.tls {
         TlsVersion::Tls13 => {
@@ -452,8 +584,26 @@ fn check_transcript(req: &Sign) -> NativeResult<()> {
             while !rest.is_empty() {
                 let header = rest.get(..4).ok_or("invalid TLS transcript")?;
                 let n = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
+                let body = rest.get(4..4 + n).ok_or("truncated TLS transcript")?;
+                if types.len() == 9 {
+                    return Err("excess TLS transcript messages".into());
+                }
+                if header[0] == 1 && tls12_sni(body) != Some(req.binding.host.host().as_bytes()) {
+                    return Err("TLS ClientHello has a different origin".into());
+                }
+                if header[0] == 11 && types.contains(&14) {
+                    // TLS 1.2 Certificate after ServerHelloDone is the client chain.
+                    let list = body.get(..3).ok_or("missing client chain")?;
+                    let length = u32::from_be_bytes([0, list[0], list[1], list[2]]) as usize;
+                    let first = body.get(3..6).ok_or("missing selected leaf")?;
+                    let leaf_length =
+                        u32::from_be_bytes([0, first[0], first[1], first[2]]) as usize;
+                    if body.len() != 3 + length || body.get(6..6 + leaf_length) != Some(leaf) {
+                        return Err("TLS transcript has a different client identity".into());
+                    }
+                }
                 types.push(header[0]);
-                rest = rest.get(4 + n..).ok_or("truncated TLS transcript")?;
+                rest = &rest[4 + n..];
             }
             if types.as_slice() != [1, 2, 11, 12, 13, 14, 11, 16]
                 && types.as_slice() != [1, 2, 11, 22, 12, 13, 14, 11, 16]

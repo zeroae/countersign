@@ -1,4 +1,5 @@
 """Run protected pairing tests using isolated daemon sessions and an encrypted login keyring."""
+import json
 import os
 import pathlib
 import secrets
@@ -15,6 +16,15 @@ def in_session(stage, addon, record):
         subprocess.run(["gnome-keyring-daemon", "--unlock", "--components=secrets"],
                        input=sys.stdin.buffer.read(), stdout=subprocess.DEVNULL, check=True)
     subprocess.run(["node", str(TEST), addon, stage, record], check=True, timeout=50)
+    if stage == "create":
+        locator = json.loads(pathlib.Path(record).read_text())["locator"]
+        token_password = subprocess.run(["secret-tool", "lookup", "application", "Countersign",
+                                         "kind", "pairing", "locator", locator],
+                                        capture_output=True, check=True, timeout=10).stdout.rstrip(b"\n")
+        assert len(token_password) == 32
+        for path in pathlib.Path(os.environ["XDG_DATA_HOME"]).rglob("*"):
+            if path.is_file():
+                assert token_password not in path.read_bytes(), "plaintext NSS unlock found"
 
 def main():
     if len(sys.argv) == 5:

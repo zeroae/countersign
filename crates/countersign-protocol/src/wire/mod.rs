@@ -274,9 +274,31 @@ pub struct OfferBinding {
     pub device: DeviceBinding,
 }
 
+/// Public issuer distinguished names are DER-encoded X.509 Name values.
+pub type DistinguishedName = Bytes<16384>;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IdentityHints {
+    pub issuer_names: Vec<DistinguishedName>,
+    /// None allows any eligible leaf. Some(empty) represents an account with no enrolled leaf.
+    pub cert_fingerprints: Option<Vec<Fingerprint>>,
+    pub signature_schemes: Vec<SignatureScheme>,
+}
+
+impl IdentityHints {
+    fn is_empty(&self) -> bool {
+        self.issuer_names.is_empty()
+            && self.cert_fingerprints.is_none()
+            && self.signature_schemes.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Offer {
+    #[serde(default, skip_serializing_if = "IdentityHints::is_empty")]
+    pub identity_hints: IdentityHints,
     pub binding: OfferBinding,
     pub workload: WorkloadBinding,
     pub initiating_host: Origin,
@@ -372,7 +394,7 @@ pub enum TlsVersion {
     Tls13,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignatureScheme {
     EcdsaNistp256Sha256,

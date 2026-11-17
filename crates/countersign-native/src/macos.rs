@@ -34,9 +34,20 @@ fn key(locator: &str) -> NativeResult<SecKey> {
     if results.len() == 1
         && let Some(SearchResult::Ref(Reference::Key(key))) = results.pop()
     {
+        check_protection(&key)?;
         return Ok(key);
     }
     Err("ambiguous or missing pairing key".into())
+}
+fn check_protection(key: &SecKey) -> NativeResult<()> {
+    let attributes = key.attributes();
+    // Core Foundation booleans are singleton objects; check that this exact
+    // private key reports the non-extractable setting requested at creation.
+    let value = attributes.find(unsafe { kSecAttrIsExtractable }.cast::<std::ffi::c_void>());
+    if value.is_none_or(|value| *value != CFBoolean::false_value().as_CFTypeRef()) {
+        return Err("Keychain could not verify pairing key protection".into());
+    }
+    Ok(())
 }
 fn point(key: &SecKey) -> NativeResult<Vec<u8>> {
     let public = key.public_key().ok_or("Keychain public key unavailable")?;
@@ -89,6 +100,10 @@ pub(crate) fn create_pairing(locator: &str) -> NativeResult<Vec<u8>> {
     #[allow(deprecated)]
     let key = SecKey::generate(attrs.into_untyped())
         .map_err(|_| "create non-exportable Keychain pairing key")?;
+    if let Err(err) = check_protection(&key) {
+        let _ = key.delete();
+        return Err(err);
+    }
     point(&key)
 }
 pub(crate) fn pairing_public(locator: &str) -> NativeResult<Vec<u8>> {

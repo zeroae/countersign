@@ -1,36 +1,60 @@
-// Test executable for a fresh CI user's file keychain. The key never leaves
-// the Keychain. Allow the same node executable that loads the production addon.
+// Disposable provider fixture, compiled separately from the product. Create
+// the private key under the same Node application's Keychain ACL that will
+// execute the product addon. Return the public point only.
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#include <node_api.h>
 
-int main(int argc, const char *argv[]) {
+static napi_value generate(napi_env env, napi_callback_info info) {
     @autoreleasepool {
-        if (argc != 3) return 2;
-        NSString *label = @(argv[1]);
-        SecTrustedApplicationRef node = NULL;
-        if (SecTrustedApplicationCreateFromPath(argv[2], &node)) return 3;
-        SecAccessRef access = NULL;
-        OSStatus result = SecAccessCreate((__bridge CFStringRef)label,
-            (__bridge CFArrayRef)@[(__bridge id)node], &access);
-        if (result) return 4;
+        size_t count = 1;
+        napi_value argv[1];
+        if (napi_get_cb_info(env, info, &count, argv, NULL, NULL) != napi_ok || count != 1)
+            goto error;
+        char text[128];
+        size_t length;
+        if (napi_get_value_string_utf8(env, argv[0], text, sizeof(text), &length) != napi_ok ||
+            length == 0 || length >= sizeof(text) - 1) goto error;
+        NSString *label = [NSString stringWithUTF8String:text];
+        if (![label hasPrefix:@"CountersignCI-"]) goto error;
         NSDictionary *attributes = @{
             (__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
             (__bridge id)kSecAttrKeySizeInBits:@256,
             (__bridge id)kSecPrivateKeyAttrs:@{
                 (__bridge id)kSecAttrIsPermanent:@YES,
                 (__bridge id)kSecAttrIsExtractable:@NO,
-                (__bridge id)kSecAttrAccess:(__bridge id)access,
                 (__bridge id)kSecAttrLabel:label
             }
         };
         SecKeyRef key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes,NULL);
-        if (!key) return 5;
+        if (!key) goto error;
         SecKeyRef publicKey = SecKeyCopyPublicKey(key);
-        if (!publicKey) return 6;
+        CFRelease(key);
+        if (!publicKey) goto error;
         NSData *point = CFBridgingRelease(SecKeyCopyExternalRepresentation(publicKey,NULL));
-        if (point.length != 65) return 7;
-        puts([point base64EncodedStringWithOptions:0].UTF8String);
-        CFRelease(publicKey); CFRelease(key); CFRelease(access); CFRelease(node);
+        CFRelease(publicKey);
+        if (point.length != 65) goto error;
+        napi_value result;
+        if (napi_create_string_utf8(env, [point base64EncodedStringWithOptions:0].UTF8String,
+                                    NAPI_AUTO_LENGTH, &result) == napi_ok) return result;
     }
-    return 0;
+error:
+    napi_throw_error(env, NULL, "create isolated macOS fixture key");
+    return NULL;
+}
+
+static napi_value no_ui(napi_env env, napi_callback_info info) {
+    if (SecKeychainSetUserInteractionAllowed(false) != errSecSuccess) {
+        napi_throw_error(env, NULL, "could not disable test account prompts");
+    }
+    return NULL;
+}
+
+NAPI_MODULE_INIT() {
+    napi_property_descriptor functions[] = {
+        {"generateWebsiteKey", NULL, generate, NULL, NULL, NULL, napi_default, NULL},
+        {"denyInteraction", NULL, no_ui, NULL, NULL, NULL, napi_default, NULL},
+    };
+    if (napi_define_properties(env, exports, 2, functions) != napi_ok) return NULL;
+    return exports;
 }

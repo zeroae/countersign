@@ -65,6 +65,10 @@ fn native_client_certificate_verify() {
     ] {
         let mut peer = Command::new("node")
             .arg(base.join("tests/native-peer.cjs"))
+            .env(
+                "COUNTERSIGN_CI_PICKER_COUNT",
+                if name == "tls12" { "2" } else { "3" },
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
