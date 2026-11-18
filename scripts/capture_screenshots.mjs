@@ -268,7 +268,7 @@ const portalShots = {
     await page.goto(PORTAL + '/#countersign=' + approvalId);
     await page.getByRole('button', { name: 'Revoke access' }).click();
     await page.getByText('Access was revoked').waitFor();
-    await capture(page, name, { clip: content, selectors: { again: '[data-act=again]' } });
+    await capture(page, name, { clip: content, selectors: { again: 'countersign-widget [data-action="connect"]' } });
   },
   async 'job-result'(browser, scheme, name) {
     const page = await portal(browser, scheme, demoApi({

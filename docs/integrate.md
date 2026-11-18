@@ -76,6 +76,6 @@ Query `status` with the session-derived user ID and the approval ID. Show “App
 
 Retire the Workload when the job exits. Close the Context when the reconciliation itself ends. To withdraw one grant earlier, revoke its approval ID. After a denial, expiry or revocation, say how access ended and offer a fresh request.
 
-![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and offering Request access again.](assets/screenshots/access-ended.png#gh-light-mode-only)![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and offering Request access again.](assets/screenshots/access-ended-dark.png#gh-dark-mode-only)
+![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and pointing to the widget's Request access button for a fresh approval.](assets/screenshots/access-ended.png#gh-light-mode-only)![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and pointing to the widget's Request access button for a fresh approval.](assets/screenshots/access-ended-dark.png#gh-dark-mode-only)
 
  In the demo, the upstream requires a client certificate and returns the leaf fingerprint it actually received. Compare it with the identity selected in the Companion. [Demo upstream](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/upstream.js)

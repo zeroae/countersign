@@ -28,26 +28,26 @@
   "access-ended-dark.png": {
     "scale": 2,
     "width": 960,
-    "height": 650,
+    "height": 590,
     "boxes": {
       "again": [
-        49,
-        544.4,
-        223.7,
-        588.4
+        652.9,
+        254.8,
+        785.6,
+        298.8
       ]
     }
   },
   "access-ended.png": {
     "scale": 2,
     "width": 960,
-    "height": 650,
+    "height": 590,
     "boxes": {
       "again": [
-        49,
-        544.4,
-        223.7,
-        588.4
+        652.9,
+        254.8,
+        785.6,
+        298.8
       ]
     }
   },

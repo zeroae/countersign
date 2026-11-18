@@ -249,12 +249,6 @@ document.querySelector('[data-act=revoke]').onclick = perform(async () => {
   clearTimeout(page.timer);
   render();
 });
-document.querySelector('[data-act=again]').onclick = perform(async () => {
-  const { id, state } = await post('connect');
-  page.renewal = false;
-  await track(id, state);
-  if (state === 'pending') widget.showRequest(id);
-});
 $('forget').onclick = perform(async () => {
   const target = page.devices.find(d => d.binding.pairing === new URL(location.href).searchParams.get('pairing'));
   if (!target) return;
