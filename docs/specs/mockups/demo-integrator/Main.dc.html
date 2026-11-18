@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harbor Ledger demo Integrator</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;600&amp;family=Inter:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+.root{
+  --bg:#e9eef2; --proto-ink:#1c2731; --proto-muted:#4f5d69; --proto-line:#c9d3db; --proto-chip:#ffffff;
+  --hl-ground:#f5f7f9; --hl-surface:#ffffff; --hl-line:#d5dde4; --hl-ink:#13293d; --hl-muted:#4b5d6e;
+  --hl-brand:#1d5f8a; --hl-brand-ink:#ffffff; --hl-soft:#e6f0f7;
+  --warn-bg:#fdf3e3; --warn-ink:#6f4300; --warn-line:#e8c98f;
+  --bad-bg:#fbeceb; --bad-ink:#8f2018; --bad-line:#e7b4ae;
+  --good-bg:#e8f2ec; --good-ink:#1f5130; --good-line:#a9cdb5;
+  --cs-band:#2b0548; --cs-band-ink:#ffffff; --cs-surface:#faf8fc; --cs-line:#d9cfe2; --cs-ink:#251c2b; --cs-muted:#54485e;
+  --cs-accent:#224805; --cs-accent-ink:#ffffff; --cs-link:#442063;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--bg); color:var(--hl-ink); font-family:Inter,system-ui,sans-serif;
+}
+.root[data-theme=dark]{
+  --bg:#0a1016; --proto-ink:#dbe5ee; --proto-muted:#a2b1be; --proto-line:#2b3946; --proto-chip:#131d26;
+  --hl-ground:#0f1820; --hl-surface:#15212c; --hl-line:#2a3a49; --hl-ink:#e5edf4; --hl-muted:#a4b4c3;
+  --hl-brand:#7cb8e4; --hl-brand-ink:#0b1a26; --hl-soft:#183042;
+  --warn-bg:#33260f; --warn-ink:#f3cf8a; --warn-line:#6b5222;
+  --bad-bg:#3a1714; --bad-ink:#ffb3ab; --bad-line:#6e2d27;
+  --good-bg:#14301f; --good-ink:#a8dbb7; --good-line:#2f5c3d;
+  --cs-surface:#1d1724; --cs-line:#3d3149; --cs-ink:#ece4f2; --cs-muted:#c3b5cf;
+  --cs-accent:#a1ca7c; --cs-accent-ink:#14240a; --cs-link:#c49bdf;
+}
+@media (prefers-color-scheme: dark){
+  .root[data-theme=auto]{
+    --bg:#0a1016; --proto-ink:#dbe5ee; --proto-muted:#a2b1be; --proto-line:#2b3946; --proto-chip:#131d26;
+    --hl-ground:#0f1820; --hl-surface:#15212c; --hl-line:#2a3a49; --hl-ink:#e5edf4; --hl-muted:#a4b4c3;
+    --hl-brand:#7cb8e4; --hl-brand-ink:#0b1a26; --hl-soft:#183042;
+    --warn-bg:#33260f; --warn-ink:#f3cf8a; --warn-line:#6b5222;
+    --bad-bg:#3a1714; --bad-ink:#ffb3ab; --bad-line:#6e2d27;
+    --good-bg:#14301f; --good-ink:#a8dbb7; --good-line:#2f5c3d;
+    --cs-surface:#1d1724; --cs-line:#3d3149; --cs-ink:#ece4f2; --cs-muted:#c3b5cf;
+    --cs-accent:#a1ca7c; --cs-accent-ink:#14240a; --cs-link:#c49bdf;
+  }
+}
+.step{font:500 14px/1 Inter,system-ui,sans-serif; min-height:44px; padding:0 14px; border-radius:22px; border:1px solid var(--proto-line); background:var(--proto-chip); color:var(--proto-ink); cursor:pointer; display:inline-flex; align-items:center; gap:8px}
+.step .n{display:inline-flex; width:22px; height:22px; border-radius:11px; align-items:center; justify-content:center; font-size:12px; background:var(--proto-line); color:var(--proto-ink)}
+.step.on{background:var(--proto-ink); color:var(--bg); border-color:var(--proto-ink)}
+.step.on .n{background:var(--bg); color:var(--proto-ink)}
+.seg{font:500 13px/1 Inter,system-ui,sans-serif; min-height:44px; padding:0 14px; border:1px solid var(--proto-line); background:var(--proto-chip); color:var(--proto-ink); cursor:pointer}
+.seg:first-child{border-radius:8px 0 0 8px}
+.seg:last-child{border-radius:0 8px 8px 0}
+.seg + .seg{margin-left:-1px}
+.seg.on{background:var(--proto-ink); color:var(--bg)}
+.sim{font:500 13px/1 Inter,system-ui,sans-serif; min-height:44px; padding:0 14px; border-radius:8px; border:1px dashed var(--proto-muted); background:transparent; color:var(--proto-ink); cursor:pointer}
+.hl-btn{font:600 14px/1 Inter,system-ui,sans-serif; min-height:44px; padding:0 18px; border-radius:8px; border:1px solid var(--hl-brand); background:var(--hl-brand); color:var(--hl-brand-ink); cursor:pointer}
+.hl-btn.ghost{background:transparent; color:var(--hl-brand)}
+.hl-btn.danger{background:transparent; border-color:var(--bad-line); color:var(--bad-ink)}
+.hl-input{font:400 15px/1.2 Inter,system-ui,sans-serif; min-height:44px; box-sizing:border-box; padding:0 12px; border-radius:8px; border:1px solid var(--hl-line); background:var(--hl-surface); color:var(--hl-ink); width:100%}
+.hl-input.code{font:600 22px/1 var(--mono); letter-spacing:.18em}
+.cs-btn{font:400 15px/1 Figtree,system-ui,sans-serif; min-height:44px; padding:0 16px; border-radius:6px; border:1px solid var(--cs-line); background:var(--cs-surface); color:var(--cs-ink); cursor:pointer}
+.cs-btn.primary{background:var(--cs-accent); border-color:var(--cs-accent); color:var(--cs-accent-ink); font-weight:600}
+.cs-link{font:400 15px/1 Figtree,system-ui,sans-serif; color:var(--cs-link); min-height:44px; display:inline-flex; align-items:center}
+.hl-nav a{color:var(--hl-muted); text-decoration:none; font-weight:500; font-size:14px; padding:12px 2px}
+.hl-nav a.on{color:var(--hl-ink); box-shadow:inset 0 -2px 0 var(--hl-brand)}
+.fp{font:400 13px/1.5 var(--mono); word-break:break-all; color:var(--hl-ink)}
+a{color:var(--hl-brand)} a:hover{color:var(--hl-ink)}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--hl-brand); outline-offset:2px}
+</style>
+</helmet>
+<div class="root" data-theme="{{theme}}" style="min-height: 100%; box-sizing: border-box; padding: 24px 16px 48px">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px">
+
+<!-- Prototype controls: not part of the mocked site -->
+<section aria-label="Prototype controls" style="display: flex; flex-direction: column; gap: 14px; color: var(--proto-ink)">
+  <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px">
+    <h1 style="margin: 0; font: 600 20px/1.3 Inter, system-ui, sans-serif">Demo Integrator site — clickable mockups</h1>
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--proto-muted)">
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 14px; height: 14px; border-radius: 3px; background: var(--hl-brand)"></span>Harbor Ledger page (Integrator owns it)</span>
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 14px; height: 14px; border-radius: 3px; background: var(--cs-band)"></span>Countersign widget</span>
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 14px; height: 14px; border-radius: 3px; border: 1px dashed var(--proto-muted)"></span>Prototype-only control</span>
+    </div>
+  </div>
+  <nav aria-label="Screens" style="display: flex; flex-wrap: wrap; gap: 8px">
+    <sc-for list="{{steps}}" as="s" hint-placeholder-count="7">
+      <button type="button" class="{{s.cls}}" aria-current="{{s.aria}}" onClick="{{s.pick}}"><span class="n">{{s.n}}</span>{{s.label}}</button>
+    </sc-for>
+  </nav>
+  <sc-if value="{{isStep4}}" hint-placeholder-val="{{ false }}">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <span style="font-size: 13px; color: var(--proto-muted)">Variant</span>
+      <div role="group" aria-label="Companion connection" style="display: inline-flex">
+        <button type="button" class="seg {{onlineCls}}" onClick="{{setOnline}}">Companion online</button>
+        <button type="button" class="seg {{offlineCls}}" onClick="{{setOffline}}">Companion offline</button>
+      </div>
+      <button type="button" class="sim" onClick="{{simApprove}}">Simulate: Approve in Companion</button>
+      <button type="button" class="sim" onClick="{{simDeny}}">Simulate: Deny in Companion</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{isStep6}}" hint-placeholder-val="{{ false }}">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <span style="font-size: 13px; color: var(--proto-muted)">How access ended</span>
+      <div role="group" aria-label="How access ended" style="display: inline-flex">
+        <button type="button" class="seg {{deniedCls}}" onClick="{{setDenied}}">Denied</button>
+        <button type="button" class="seg {{expiredCls}}" onClick="{{setExpired}}">Expired</button>
+        <button type="button" class="seg {{revokedCls}}" onClick="{{setRevoked}}">Revoked</button>
+      </div>
+    </div>
+  </sc-if>
+</section>
+
+<!-- The mocked Harbor Ledger site -->
+<div style="border: 1px solid var(--hl-line); border-radius: 12px; overflow: hidden; background: var(--hl-ground); box-shadow: 0 1px 2px rgba(10,20,30,.06), 0 8px 24px rgba(10,20,30,.06)">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px 24px; background: var(--hl-surface); border-bottom: 1px solid var(--hl-line)">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="8" fill="var(--hl-brand)"></rect><path d="M7 21c3-3 5-3 7 0s4 3 6 0 4-3 7 0" fill="none" stroke="var(--hl-brand-ink)" stroke-width="2.2" stroke-linecap="round"></path><path d="M11 15V9h12v6" fill="none" stroke="var(--hl-brand-ink)" stroke-width="2.2" stroke-linejoin="round"></path></svg>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span style="font: 600 17px/1.1 Inter, system-ui, sans-serif">Harbor Ledger</span>
+        <span style="font-size: 12px; color: var(--hl-muted)">Client reporting workspace</span>
+      </div>
+    </div>
+    <sc-if value="{{signedIn}}" hint-placeholder-val="{{ true }}">
+      <nav class="hl-nav" aria-label="Harbor Ledger" style="display: flex; flex-wrap: wrap; gap: 20px">
+        <a href="#reports">Reports</a>
+        <a href="#jobs" class="on" aria-current="page">Reconciliations</a>
+        <a href="#clients">Clients</a>
+      </nav>
+    </sc-if>
+    <sc-if value="{{signedIn}}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; align-items: center; gap: 12px; font-size: 14px">
+        <span style="color: var(--hl-muted)">Signed in as <strong style="color: var(--hl-ink); font-weight: 600">u-42</strong></span>
+        <button type="button" class="hl-btn ghost" onClick="{{signOut}}">Sign out</button>
+      </div>
+    </sc-if>
+  </header>
+
+  <!-- 1 · Sign in -->
+  <sc-if value="{{isStep1}}" hint-placeholder-val="{{ false }}">
+    <main style="display: flex; justify-content: center; padding: 64px 16px 80px">
+      <div style="width: 100%; max-width: 400px; box-sizing: border-box; background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 32px; display: flex; flex-direction: column; gap: 18px">
+        <h2 style="margin: 0; font: 600 22px/1.25 Inter, system-ui, sans-serif">Sign in</h2>
+        <p style="margin: 0; color: var(--hl-muted); font-size: 14px; line-height: 1.5">This demo uses a temporary secret. The launcher printed the path of the file that holds it.</p>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <label for="hl-secret" style="font-size: 14px; font-weight: 500">Demo login secret</label>
+          <input id="hl-secret" class="hl-input" type="password" autocomplete="off" placeholder="Mockup — nothing is sent">
+        </div>
+        <button type="button" class="hl-btn" onClick="{{signIn}}">Sign in</button>
+      </div>
+    </main>
+  </sc-if>
+
+  <!-- 2–6 · Workspace -->
+  <sc-if value="{{inWorkspace}}" hint-placeholder-val="{{ true }}">
+    <main style="display: flex; flex-wrap: wrap; gap: 20px; padding: 24px">
+
+      <!-- Integrator column -->
+      <div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+
+        <section aria-labelledby="ctx-h" style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--hl-muted)">Context</span>
+              <h2 id="ctx-h" style="margin: 0; font: 600 22px/1.25 Inter, system-ui, sans-serif">Q3 close reconciliation</h2>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 16px; background: var(--hl-soft); color: var(--hl-ink)">{{jobStatus}}</span>
+          </div>
+          <dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; font-size: 14px">
+            <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Context ID</dt><dd style="margin: 0; font-family: var(--mono)">close-q3</dd></div>
+            <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Workload</dt><dd style="margin: 0; font-family: var(--mono)">export-981 · gen 1</dd></div>
+            <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Destination</dt><dd style="margin: 0; font-family: var(--mono)">ledger.partner.example:443</dd></div>
+            <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Companion</dt><dd style="margin: 0">{{pairLabel}}</dd></div>
+          </dl>
+        </section>
+
+        <!-- 2 · Home, not paired / paired -->
+        <sc-if value="{{isStep2}}" hint-placeholder-val="{{ true }}">
+          <section style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+            <sc-if value="{{notPaired}}" hint-placeholder-val="{{ true }}">
+              <h3 style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Use your client certificate for this job</h3>
+              <p style="margin: 0; color: var(--hl-muted); font-size: 14px; line-height: 1.55">The statement export reads from the partner ledger with your installed client certificate. Its private key stays on your computer. Pair the Countersign Companion once, then approve each job when it asks.</p>
+            </sc-if>
+            <sc-if value="{{paired}}" hint-placeholder-val="{{ false }}">
+              <h3 style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Companion paired</h3>
+              <p style="margin: 0; color: var(--hl-muted); font-size: 14px; line-height: 1.55">Confirm the account in your Companion too. When it shows <strong style="color: var(--hl-ink)">Connected</strong>, choose <strong style="color: var(--hl-ink)">Request access</strong> to start the job.</p>
+            </sc-if>
+          </section>
+        </sc-if>
+
+        <!-- 3 · Pair -->
+        <sc-if value="{{isStep3}}" hint-placeholder-val="{{ false }}">
+          <section aria-labelledby="pair-h" style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+            <h3 id="pair-h" style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Pair your Companion</h3>
+            <ol style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5">
+              <li>Open Countersign, choose <strong>Pair</strong>, and enter <span style="font-family: var(--mono)">https://portal.example</span></li>
+              <li>Type the code the Companion shows. Signed in as <strong>u-42</strong>.</li>
+              <li>Confirm the account in the Companion when it asks.</li>
+            </ol>
+            <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+              <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 6px">
+                <label for="hl-code" style="font-size: 14px; font-weight: 500">Code from your Companion</label>
+                <input id="hl-code" class="hl-input code" value="7B9DF613D8" autocomplete="off" spellcheck="false">
+              </div>
+              <button type="button" class="hl-btn" onClick="{{confirmPair}}">Confirm pairing</button>
+            </div>
+          </section>
+        </sc-if>
+
+        <!-- 4 · Pending -->
+        <sc-if value="{{isStep4}}" hint-placeholder-val="{{ false }}">
+          <section style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+            <h3 style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Waiting for your approval</h3>
+            <p style="margin: 0; color: var(--hl-muted); font-size: 14px; line-height: 1.55">The job asked for <span style="font-family: var(--mono); color: var(--hl-ink)">ledger.partner.example:443</span>. Its first request waits while you choose a certificate and a duration in the Companion.</p>
+            <sc-if value="{{offline}}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 10px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink)">
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="M12 3 2 20h20L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 10v4M12 17v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                <div style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.5">
+                  <strong>Your Companion isn't connected</strong>
+                  <span>Open Countersign on your computer. The request stays pending until it times out at 7:52 PM; after that, request access again.</span>
+                </div>
+              </div>
+            </sc-if>
+          </section>
+        </sc-if>
+
+        <!-- 5 · Active -->
+        <sc-if value="{{isStep5}}" hint-placeholder-val="{{ false }}">
+          <section aria-labelledby="grant-h" style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+              <h3 id="grant-h" style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Access approved</h3>
+              <span style="font-size: 14px; color: var(--hl-muted)">Access ends in <strong style="font: 600 18px/1 var(--mono); color: var(--hl-ink)">{{countdown}}</strong></span>
+            </div>
+            <ul aria-label="Progress" style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px">
+              <sc-for list="{{progress}}" as="p" hint-placeholder-count="3">
+                <li style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: var(--good-bg); border: 1px solid var(--good-line); color: var(--good-ink); font-size: 14px; font-weight: 500">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{p}}
+                </li>
+              </sc-for>
+            </ul>
+            <dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; font-size: 14px">
+              <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Requested host</dt><dd style="margin: 0; font-family: var(--mono)">ledger.partner.example:443</dd></div>
+              <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Approval covers</dt><dd style="margin: 0; font-family: var(--mono)">ledger.partner.example:443</dd></div>
+              <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Certificate</dt><dd style="margin: 0">CN=Demo user</dd></div>
+              <div style="display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">Approval ID</dt><dd style="margin: 0; font-family: var(--mono)">ap_7QkV2mXrN4cWpL9sTbHe1A</dd></div>
+              <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px"><dt style="color: var(--hl-muted)">SHA-256</dt><dd class="fp" style="margin: 0">c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b</dd></div>
+            </dl>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px">
+              <button type="button" class="hl-btn" onClick="{{runJob}}">Run export</button>
+              <button type="button" class="hl-btn ghost">Check status</button>
+              <button type="button" class="hl-btn ghost" onClick="{{renew}}">Renew</button>
+              <button type="button" class="hl-btn danger" onClick="{{revoke}}">Revoke access</button>
+            </div>
+            <p style="margin: 0; font-size: 13px; color: var(--hl-muted); line-height: 1.5">Closing the Companion can leave this connection usable until its lease expires. A new handshake needs the Companion online. <a href="#devices">Forget Companion 7B9DF613D8 and revoke its grants</a></p>
+          </section>
+        </sc-if>
+
+        <!-- 6 · Ended -->
+        <sc-if value="{{isStep6}}" hint-placeholder-val="{{ false }}">
+          <section style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+            <div role="status" style="display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 10px; background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad-ink)">
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; margin-top: 1px"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+              <div style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.5">
+                <strong>{{endTitle}}</strong>
+                <span>{{endBody}}</span>
+              </div>
+            </div>
+            <p style="margin: 0; color: var(--hl-muted); font-size: 14px; line-height: 1.55">A new request starts a fresh approval. If the job's original request already timed out, the job has to send another one after you approve.</p>
+            <div><button type="button" class="hl-btn" onClick="{{requestAgain}}">Request access again</button></div>
+          </section>
+        </sc-if>
+      </div>
+
+      <!-- Countersign widget column -->
+      <aside aria-label="Countersign widget" style="flex: 1 1 320px; min-width: 0; align-self: flex-start; border: 1px solid var(--cs-line); border-radius: 10px; overflow: hidden; background: var(--cs-surface); color: var(--cs-ink); font-family: Figtree, system-ui, sans-serif">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--cs-band); color: var(--cs-band-ink)">
+          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><g fill="currentColor"><rect x="3" y="8" width="18" height="6"></rect><rect x="11" y="18" width="18" height="6"></rect></g></svg>
+          <span aria-hidden="true" style="width: 1px; height: 20px; background: currentColor; opacity: .7"></span>
+          <span style="font: 300 18px/1 Figtree, system-ui, sans-serif; letter-spacing: .02em">countersign</span>
+        </div>
+        <div style="padding: 18px 16px 20px; display: flex; flex-direction: column; gap: 14px">
+          <p style="margin: 0; font: 300 22px/1.25 Figtree, system-ui, sans-serif">{{widgetHeadline}}</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+            <button type="button" class="{{pairBtnCls}}" onClick="{{pairAction}}">Pair Companion</button>
+            <button type="button" class="{{reqBtnCls}}" onClick="{{requestAccess}}">Request access</button>
+            <sc-if value="{{showLaunch}}" hint-placeholder-val="{{ false }}">
+              <a class="cs-link" href="#countersign-approve">Open Companion</a>
+            </sc-if>
+            <sc-if value="{{showLaunch}}" hint-placeholder-val="{{ false }}">
+              <button type="button" class="cs-btn">Enable notifications</button>
+            </sc-if>
+          </div>
+          <sc-if value="{{hasWidgetStatus}}" hint-placeholder-val="{{ false }}">
+            <p role="status" style="margin: 0; font-size: 15px; line-height: 1.45; color: var(--cs-muted)">{{widgetStatus}}</p>
+          </sc-if>
+        </div>
+      </aside>
+    </main>
+  </sc-if>
+
+  <!-- 7 · Job result -->
+  <sc-if value="{{isStep7}}" hint-placeholder-val="{{ false }}">
+    <main style="padding: 24px; display: flex; flex-direction: column; gap: 20px">
+      <section aria-labelledby="job-h" style="background: var(--hl-surface); border: 1px solid var(--hl-line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <span style="font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--hl-muted)">Job export-981 · Q3 close reconciliation</span>
+            <h2 id="job-h" style="margin: 0; font: 600 22px/1.25 Inter, system-ui, sans-serif">Statement fetched</h2>
+          </div>
+          <span style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 16px; background: var(--good-bg); color: var(--good-ink); border: 1px solid var(--good-line)">HTTP 200</span>
+        </div>
+        <div style="font: 400 14px/1.5 var(--mono); padding: 12px 14px; border-radius: 8px; background: var(--hl-ground); border: 1px solid var(--hl-line); overflow-x: auto; white-space: nowrap">GET https://ledger.partner.example/statements/latest</div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <h3 style="margin: 0; font: 600 17px/1.3 Inter, system-ui, sans-serif">Which key signed the handshake?</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+            <div style="padding: 14px 16px; border-radius: 10px; border: 1px solid var(--hl-line); display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 13px; color: var(--hl-muted)">Fingerprint the site received</span>
+              <span class="fp">c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b</span>
+              <span style="font-size: 13px; color: var(--hl-muted)">Subject: Demo user</span>
+            </div>
+            <div style="padding: 14px 16px; border-radius: 10px; border: 1px solid var(--hl-line); display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 13px; color: var(--hl-muted)">Certificate you selected in the Companion</span>
+              <span class="fp">c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b</span>
+              <span style="font-size: 13px; color: var(--hl-muted)">CN=Demo user · Countersign demo client-ca</span>
+            </div>
+          </div>
+          <p role="status" style="margin: 0; display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 8px 12px; border-radius: 8px; background: var(--good-bg); border: 1px solid var(--good-line); color: var(--good-ink); font-size: 14px; font-weight: 600">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>Fingerprints match — the site saw the key you approved
+          </p>
+          <p style="margin: 0; font-size: 13px; color: var(--hl-muted); line-height: 1.5">Matching subject names alone can't identify the key. Compare the full SHA-256 fingerprint.</p>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px">
+          <button type="button" class="hl-btn ghost" onClick="{{backToGrant}}">Back to access</button>
+          <button type="button" class="hl-btn danger" onClick="{{revoke}}">Revoke access</button>
+        </div>
+      </section>
+    </main>
+  </sc-if>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["auto","light","dark"],"default":"auto"},"$preview":{"width":1280,"height":1180}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 2, paired: false, offline: false, ended: 'denied', left: 3552 };
+    this.timer = null;
+  }
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (this.state.step === 5 && this.state.left > 0) this.setState({ left: this.state.left - 1 });
+    }, 1000);
+  }
+  componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+  go(step, extra) { this.setState(Object.assign({ step: step }, extra || {})); }
+  renderVals() {
+    const st = this.state;
+    const labels = ['Sign in', 'Workspace home', 'Pair Companion', 'Access pending', 'Access active', 'Access ended', 'Job result'];
+    const steps = labels.map((label, i) => ({
+      n: i + 1, label: label,
+      cls: st.step === i + 1 ? 'step on' : 'step',
+      aria: st.step === i + 1 ? 'step' : 'false',
+      pick: () => this.go(i + 1, i + 1 === 2 ? { paired: false } : (i + 1 === 5 ? { left: 3552 } : {}))
+    }));
+    const mm = String(Math.floor(st.left / 60)).padStart(2, '0');
+    const ss = String(st.left % 60).padStart(2, '0');
+    const ends = {
+      denied: ['Access was denied in the Companion', 'The job can’t reach ledger.partner.example:443. Nothing was signed with your certificate.'],
+      expired: ['Your approval expired at 7:39 PM', 'The job can no longer open new connections to ledger.partner.example:443.'],
+      revoked: ['Access was revoked', 'The Broker recorded the revocation. Open connections close by their current lease deadline, within 30 seconds.']
+    };
+    const statusByStep = { 2: 'Not paired', 3: 'Pairing', 4: 'Pending', 5: 'Running', 6: 'Stopped' };
+    const jobStatus = st.step === 2 && st.paired ? 'Ready' : (statusByStep[st.step] || '');
+    const headlines = { 2: st.paired ? 'Ready to request access' : 'Approve with your desktop', 3: 'Pairing', 4: 'Waiting for you', 5: 'Access approved', 6: 'Access ended' };
+    let widgetStatus = '';
+    if (st.step === 3) widgetStatus = 'Continue pairing in your Companion.';
+    if (st.step === 4 || st.step === 5) widgetStatus = 'Review this request in your Companion.';
+    const pairFirst = st.step === 2 && !st.paired;
+    return {
+      theme: this.props.theme ?? 'auto',
+      steps: steps,
+      signedIn: st.step !== 1,
+      isStep1: st.step === 1, isStep2: st.step === 2, isStep3: st.step === 3, isStep4: st.step === 4,
+      isStep5: st.step === 5, isStep6: st.step === 6, isStep7: st.step === 7,
+      inWorkspace: st.step >= 2 && st.step <= 6,
+      paired: st.paired, notPaired: !st.paired,
+      pairLabel: (st.step === 2 && !st.paired) || st.step === 3 ? 'Not paired' : 'Paired · 7B9DF613D8',
+      jobStatus: jobStatus,
+      offline: st.offline,
+      onlineCls: st.offline ? '' : 'on', offlineCls: st.offline ? 'on' : '',
+      deniedCls: st.ended === 'denied' ? 'on' : '', expiredCls: st.ended === 'expired' ? 'on' : '', revokedCls: st.ended === 'revoked' ? 'on' : '',
+      endTitle: ends[st.ended][0], endBody: ends[st.ended][1],
+      countdown: mm + ':' + ss,
+      progress: ['Approved', 'Ready for handshakes', 'Upstream accepted mTLS'],
+      widgetHeadline: headlines[st.step] || '',
+      widgetStatus: widgetStatus, hasWidgetStatus: widgetStatus !== '',
+      showLaunch: st.step === 4 || st.step === 5,
+      pairBtnCls: pairFirst ? 'cs-btn primary' : 'cs-btn',
+      reqBtnCls: pairFirst ? 'cs-btn' : 'cs-btn primary',
+      signIn: () => this.go(2, { paired: false }),
+      signOut: () => this.go(1),
+      pairAction: () => this.go(3),
+      confirmPair: () => this.go(2, { paired: true }),
+      requestAccess: () => this.go(4, { offline: false }),
+      requestAgain: () => this.go(4, { offline: false }),
+      setOnline: () => this.setState({ offline: false }),
+      setOffline: () => this.setState({ offline: true }),
+      simApprove: () => this.go(5, { left: 3552 }),
+      simDeny: () => this.go(6, { ended: 'denied' }),
+      setDenied: () => this.setState({ ended: 'denied' }),
+      setExpired: () => this.setState({ ended: 'expired' }),
+      setRevoked: () => this.setState({ ended: 'revoked' }),
+      renew: () => this.setState({ left: 3600 }),
+      revoke: () => this.go(6, { ended: 'revoked' }),
+      runJob: () => this.go(7),
+      backToGrant: () => this.go(5)
+    };
+  }
+}
+</script>
+</body>
+</html>
