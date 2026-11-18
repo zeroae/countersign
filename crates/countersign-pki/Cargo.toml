@@ -1,0 +1,15 @@
+[package]
+name = "countersign-pki"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+der = "0.7"
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-webpki = { version = "0.103", features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+x509-ocsp = "0.2.1"
+x509-parser = { version = "0.18", features = ["verify"] }

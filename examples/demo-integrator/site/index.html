@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Countersign demo</title><script type="module" src="/app.js"></script></head>
+<body><main>
+<h1>Demo Integrator</h1>
+<form id="login" hidden><label>Demo login secret <input name="password" type="password" required></label><button>Sign in</button></form>
+<section id="session" hidden>
+<p>Demo Context · site.test:9444</p>
+<form id="pair" hidden><label>Code from your Companion <input name="code" required></label><button>Confirm pairing</button></form>
+<button id="forget" hidden>Forget this Companion and revoke its grants</button>
+<countersign-widget></countersign-widget>
+<div id="grant" hidden><button id="status">Check status</button> <button id="renew">Renew</button> <button id="revoke">Revoke access</button></div>
+<button id="logout">Sign out</button>
+</section><p role="status" id="message"></p>
+</main></body></html>

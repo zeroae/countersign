@@ -1,0 +1,17 @@
+{
+  "name": "@countersign/widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/widget.js",
+    "./service-worker": "./src/service-worker.js"
+  },
+  "scripts": {
+    "lint": "eslint src test",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "happy-dom": "^21.0.4"
+  }
+}

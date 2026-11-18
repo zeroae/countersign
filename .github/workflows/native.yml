@@ -1,0 +1,75 @@
+name: Native provider qualification
+on:
+  push:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')) && '["ubuntu-24.04","ubuntu-24.04-arm","windows-2025","windows-11-arm","macos-26","macos-15-intel"]' || '["ubuntu-24.04","ubuntu-24.04-arm","windows-2025","windows-11-arm"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          # Python only generates public test certificates. Node, Cargo and
+          # the product addon must match the hosted runner's architecture.
+          architecture: ${{ matrix.os == 'windows-11-arm' && 'x64' || '' }}
+      - name: Require a native Node process
+        run: node -e "if (process.arch.toUpperCase() !== process.env.RUNNER_ARCH) process.exit(1)"
+      - name: Install Linux providers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3-dev softhsm2 libsecret-tools gnome-keyring dbus-daemon
+          python -m pip install python-pkcs11==0.10.1 asn1crypto==1.5.1
+      - run: python -m pip install cryptography==50.0.2
+      - name: Build production addon
+        run: cargo build --release --locked -p countersign-native
+      - name: Build native TLS test harness
+        run: cargo test --no-run --locked -p countersign-native --test native_mtls
+      - name: Stage native prebuild
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, shutil
+          base=Path("target/release")
+          files={"Windows":"countersign_native.dll","Linux":"libcountersign_native.so","macOS":"libcountersign_native.dylib"}
+          root=Path("prebuild")
+          root.mkdir()
+          shutil.copy(base/files[os.environ["RUNNER_OS"]],root/"countersign.node")
+      - name: Check protected storage after service restart and lock
+        if: runner.os == 'Linux'
+        run: python crates/countersign-native/tests/linux-keyring.py prebuild/countersign.node
+      - name: Verify product addon and real TLS client signatures
+        run: python crates/countersign-native/tests/native_ci.py prebuild/countersign.node
+      - name: Record native evidence
+        shell: python
+        run: |
+          import os, platform, subprocess
+          from pathlib import Path
+          rev=os.environ["GITHUB_SHA"]
+          runner=os.environ["RUNNER_OS"]+" "+os.environ["RUNNER_ARCH"]
+          node=subprocess.check_output(["node","--version"],text=True).strip()
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as out:
+              out.write(f"Verified {runner} production addon on {rev} with {node} on {platform.platform()}.\n\n")
+              out.write("Two- and three-choice selection, approved leaf possession in TLS 1.2 and 1.3, "
+                        "forbidden exports, scoped signing, replay rejection, pairing proof, cold access and retirement passed.\n")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}-${{ runner.arch }}
+          path: prebuild/countersign.node
+          if-no-files-found: error

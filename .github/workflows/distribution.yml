@@ -1,0 +1,138 @@
+name: Desktop and container distribution
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+          - { os: windows-2025, arch: x64 }
+          - { os: windows-11-arm, arch: arm64 }
+          - { os: macos-15-intel, arch: x64 }
+          - { os: macos-26, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libnss3-dev rpm fakeroot
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --release --locked -p countersign-native
+      - run: node scripts/native-package.mjs
+      - name: Build unsigned installer
+        if: github.event_name == 'pull_request' || vars.COUNTERSIGN_SIGN_RELEASES != 'true' || runner.os == 'Linux'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --filter @countersign/companion package
+      - name: Sign Windows release
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows' && vars.COUNTERSIGN_SIGN_RELEASES == 'true'
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: pnpm --filter @countersign/companion package --config.forceCodeSigning=true
+      - name: Sign and notarize macOS release
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'macOS' && vars.COUNTERSIGN_SIGN_RELEASES == 'true'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm --filter @countersign/companion package --config.forceCodeSigning=true --config.mac.notarize=true
+      - name: Load the packaged addon with its bundled Electron runtime
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, subprocess, sys
+          dist = Path("packages/companion/dist")
+          [addon] = dist.glob("**/app.asar.unpacked/native/countersign-native.node")
+          bundle = addon.resolve().parents[3]
+          if sys.platform == "darwin":
+              executable = bundle / "MacOS" / "Countersign"
+          elif sys.platform == "win32":
+              executable = bundle / "Countersign.exe"
+          else:
+              executable = bundle / "countersign-companion"
+          probe = "const a=require(process.argv[1]); if(typeof a.signTls!=='function'||typeof a.listIdentities!=='function')process.exit(1); console.log(process.versions.electron,process.arch)"
+          subprocess.run([str(executable), "-e", probe, str(addon.resolve())],
+                         env=dict(os.environ, ELECTRON_RUN_AS_NODE="1"), check=True, timeout=45)
+      - name: Name the native prebuild
+        shell: bash
+        run: cp packages/companion/native/countersign-native.node countersign-native-${{ matrix.os }}-${{ matrix.arch }}.node
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            countersign-native-*.node
+            packages/companion/dist/*.deb
+            packages/companion/dist/*.AppImage
+            packages/companion/dist/*.exe
+            packages/companion/dist/*.pkg
+
+  images:
+    strategy:
+      matrix:
+        component: [gateway, broker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: distribution/Dockerfile
+          target: ${{ matrix.component }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ghcr.io/zeroae/countersign-${{ matrix.component }}:${{ github.event_name == 'pull_request' && github.sha || github.ref_name }}
+
+  release:
+    needs: [desktop, images]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: artifacts
+          merge-multiple: true
+      - name: Attach installers, prebuilds and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir release
+          find artifacts -type f -exec mv -t release {} +
+          cd release
+          sha256sum * > SHA256SUMS
+          gh release create "$TAG" --repo "$REPO" --verify-tag --generate-notes ./*

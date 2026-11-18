@@ -1,0 +1,67 @@
+context:
+  version: "0.1.0"
+
+package:
+  name: countersign-companion
+  version: ${{ version }}
+
+source:
+  path: ..
+  use_gitignore: true
+
+build:
+  number: 0
+  dynamic_linking:
+    binary_relocation:
+      - lib/countersign-companion/resources/app.asar.unpacked/native/countersign-native.node
+  skip:
+    - win or osx
+
+requirements:
+  build:
+    - rust >=1.99
+    - nodejs >=24
+    - pnpm 10.*
+    - patchelf
+    - pkg-config
+    - ${{ compiler('c') }}
+    - ${{ compiler('cxx') }}
+  host:
+    - nss
+  run:
+    - nss
+    - nspr
+    - gtk3
+    - alsa-lib
+    - p11-kit
+    - libglib
+    - atk-1.0
+    - at-spi2-atk
+    - at-spi2-core
+    - libcups
+    - dbus
+    - cairo
+    - libpango
+    - libgbm
+    - libudev1
+    - libexpat
+    - libgcc
+    - libxcb
+    - libxkbcommon
+    - xorg-libx11
+    - xorg-libxcomposite
+    - xorg-libxdamage
+    - xorg-libxext
+    - xorg-libxfixes
+    - xorg-libxrandr
+
+tests:
+  - script:
+      - test -x "$PREFIX/bin/countersign-companion"
+      - test -f "$PREFIX/lib/countersign-companion/resources/app.asar.unpacked/native/countersign-native.node"
+      - ELECTRON_RUN_AS_NODE=1 "$PREFIX/bin/countersign-companion" -e "console.log(process.versions.electron)"
+
+about:
+  homepage: https://github.com/zeroae/countersign
+  summary: Desktop approval for delegated TLS client certificate authentication
+  license: LicenseRef-Undeclared
