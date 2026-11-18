@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import WebSocket from 'ws';
 import { displayText } from './origins.js';
-import { readTheme, refreshTheme } from './theme.js';
+import { readTheme, refreshTheme, reviewTheme } from './theme.js';
 
 function authority(origin) {
   const url = new URL(origin);
@@ -85,7 +85,8 @@ export class Session extends EventEmitter {
     const r = this.record;
     if (type === 'pairing_pending' && !this.device && !r.pairing && !this.attempt) {
       this.attempt = body.attempt;
-      this.status = 'Pairing code ' + displayText(body.code, 32);
+      this.code = displayText(body.code, 32);
+      this.status = 'Pairing code ' + this.code;
       this.emit('changed');
       await this.launchPairing(r.origin, body.attempt);
       return;
@@ -96,7 +97,7 @@ export class Session extends EventEmitter {
           body.issued_at_ms > Date.now() + 1000 || body.expires_at_ms - body.issued_at_ms > 60000 ||
           (r.pairing ? body.purpose.reconnect?.pairing !== r.pairing || body.user !== r.user || body.key !== r.key :
             !this.attempt || body.purpose.pair?.attempt !== this.attempt)) throw new Error('Invalid pairing challenge.');
-      if (!r.pairing && !await this.confirmAccount(r.origin, displayText(body.user), this.status)) {
+      if (!r.pairing && !await this.confirmAccount(r.origin, displayText(body.user), this.code)) {
         this.stop();
         return;
       }
@@ -156,7 +157,7 @@ export class Session extends EventEmitter {
         providerUnavailable = true;
       }
       if (!current() || body.expires_at_ms <= Date.now()) return;
-      this.offers.set(approval, { handle: randomUUID(), body, identities, providerUnavailable });
+      this.offers.set(approval, { handle: randomUUID(), received: Date.now(), body, identities, providerUnavailable });
       this.emit('changed');
     } else if (type === 'revoke_recorded') {
       if (this.revokeRequests.get(id) !== body.id) return;
@@ -211,6 +212,13 @@ export class Session extends EventEmitter {
       if (!r) throw new Error('Pairing retired.');
       return refreshTheme(r, theme);
     });
+    this.record = this.store.get(this.record.id);
+    this.emit('changed');
+  }
+
+  // Accept the pending branding, or keep the current one.
+  async reviewBrand(digest, accept) {
+    await this.store.update(this.record.id, r => reviewTheme(r, digest, accept));
     this.record = this.store.get(this.record.id);
     this.emit('changed');
   }

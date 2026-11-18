@@ -30,34 +30,55 @@ FONT_FILES = ("DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSan
 OUTSET, LINE, RADIUS, FONT, GAP = 4, 3, 5, 12, 6
 
 # output name -> (raw source, [(box key from boxes.json, label, placement[, anchor key])])
-# Placement puts the label to the "right" of the box, "below-end" or
+# Placement puts the label to the "right" or "left" of the box, "below-end" or
 # "above-end" (under or over it, flush with its right edge), or "inside-end"
 # (inside its top-right corner). With an anchor key the label is placed
 # against that box instead of the highlighted one.
 CALLOUTS: dict[str, tuple[str, list[tuple[str, ...]]]] = {
     "approval-unselected.png": ("approval-unselected.png", [
-        ("identities", "Same name: compare issuer, expiry, SHA-256", "inside-end"),
-        ("approve", "Disabled until you choose", "right", "actions"),
+        ("identities", "Same name: compare the highlighted fingerprints", "inside-end"),
+        ("actions", "Fixed labels, order and size", "above-end"),
     ]),
     "approval-selected.png": ("approval-selected.png", [
         ("selected", "Selected certificate", "inside-end"),
-        ("expiry", "Approval ends here", "right"),
+        ("expiry", "Approval ends here", "inside-end"),
     ]),
     "approval-branding.png": ("approval-selected.png", [
-        ("branding", "Integrator branding", "below-end"),
+        ("header", "Branding + verified origin", "right"),
+        ("facts", "Request facts: fixed rows and order", "inside-end"),
+        ("plate", "Fixed Countersign mark", "left"),
     ]),
     "scope-wildcard.png": ("scope-wildcard.png", [
-        ("scope", "Exact host vs. what approval covers", "right"),
+        ("scope", "Exact host vs. what approval covers", "above-end"),
     ]),
     "branding-alternate.png": ("branding-alternate.png", [
-        ("branding", "Integrator branding", "below-end"),
+        ("header", "Branding + verified origin", "right"),
+        ("approve", "Clamped accent colour", "above-end"),
+    ]),
+    "branding-none.png": ("branding-none.png", [
+        ("brand", "No manifest", "right"),
+    ]),
+    "queue-switch.png": ("queue-switch.png", [
+        ("banner", "Fixed banner", "inside-end"),
+        ("approve", "Locked for a moment", "above-end"),
     ]),
     "pairing-browser.png": ("pairing-browser.png", [
         ("code", "Code from the Companion", "inside-end"),
     ]),
     "pairing-companion.png": ("pairing-companion.png", [
-        ("confirmation", "Check origin, account and code", "right"),
+        ("facts", "Check origin and account", "inside-end"),
+        ("code", "Same code as the browser", "inside-end"),
     ]),
+    "integrators-list.png": ("integrators-list.png", []),
+    "integrator-detail.png": ("integrator-detail.png", [
+        ("notice", "Security notice", "inside-end"),
+        ("self", "Known from this pairing", "right"),
+    ]),
+    "branding-review.png": ("branding-review.png", [
+        ("review", "Old and new branding", "above-end"),
+        ("buttons", "Accept or keep", "right"),
+    ]),
+    "dialog-remove.png": ("dialog-remove.png", []),
     "widget.png": ("widget.png", [
         ("page", "Integrator page", "below-end"),
         ("widget", "Countersign widget", "below-end"),
@@ -105,6 +126,8 @@ def annotate(src: Path, meta: dict, callouts) -> Image.Image:
         w, h = right - left + 2 * pad_x, bottom - top + 2 * pad_y
         if placement == "right":
             bx, by = x1 + GAP * k, (y0 + y1 - h) / 2
+        elif placement == "left":
+            bx, by = x0 - GAP * k - w, (y0 + y1 - h) / 2
         elif placement == "below-end":
             bx, by = x1 - w, y1 + GAP * k
         elif placement == "above-end":

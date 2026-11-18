@@ -22,22 +22,22 @@ Replace the app path with your executable. If you have Chromium installed, you c
 
 The screenshots below are rendered from fixtures with the example names from [Add Countersign to a service](integrate.md): origin `https://portal.example`, account `u-42` and host `ledger.partner.example:443`. Your run shows the printed `https://localhost` origin, `demo-user` and `site.test:9444`.
 
-1. Enter the printed HTTPS origin in the Companion’s **Integrator origin** field. Choose **Pair**.
+1. Open the Companion’s **Integrators** tab. Enter the printed HTTPS origin in **Integrator origin** and choose **Pair**. The Companion shows a pairing code.
 2. In the browser tab opened by the Companion, sign in with the temporary secret from the printed file. Enter the pairing code shown in the Companion and choose **Confirm pairing**.
 
    ![Harbor Ledger, the demo Integrator, asking for the code shown in the Companion, with the Countersign widget beside the form.](assets/screenshots/pairing-browser.png#gh-light-mode-only)![Harbor Ledger, the demo Integrator, asking for the code shown in the Companion, with the Countersign widget beside the form.](assets/screenshots/pairing-browser-dark.png#gh-dark-mode-only)
 
-3. In the Companion, check that the origin and account belong to this demo. Choose **Confirm pairing**. The paired Integrator should show **Connected**.
+3. In the Companion, check that the origin and account belong to this demo and that the code matches the browser. Choose **Confirm pairing**. The Integrator appears in the list with **Connected**.
 
-   ![Companion asking the user to confirm the verified Integrator origin, the account and the pairing code.](assets/screenshots/pairing-companion.png)
+   ![Companion in Harbor Ledger's colours asking the user to confirm the verified Integrator origin and account, with the pairing code 7B9D F613 D8 in large type above Cancel pairing and Confirm pairing.](assets/screenshots/pairing-companion.png#gh-light-mode-only)![Companion in Harbor Ledger's colours asking the user to confirm the verified Integrator origin and account, with the pairing code 7B9D F613 D8 in large type above Cancel pairing and Confirm pairing.](assets/screenshots/pairing-companion-dark.png#gh-dark-mode-only)
 
 ## Choose a certificate and verify it
 
-Type `curl` at the launcher's prompt. The Workload already has the proxy address and the public sidecar CA. The first request waits while you decide.
+Type `curl` at the launcher's prompt. The Workload already has the proxy address and the public sidecar CA. The first request waits while you decide, and the Companion opens its **Requests** tab.
 
-![Companion listing two identically named certificates for the same host, with Approve disabled until one is selected.](assets/screenshots/approval-unselected.png)
+![Companion showing the oldest of two waiting requests in Harbor Ledger's colours, with two identically named certificates whose fingerprints differ in the highlighted groups, and Approve disabled until one is selected.](assets/screenshots/approval-unselected.png#gh-light-mode-only)![Companion showing the oldest of two waiting requests in Harbor Ledger's colours, with two identically named certificates whose fingerprints differ in the highlighted groups, and Approve disabled until one is selected.](assets/screenshots/approval-unselected-dark.png#gh-dark-mode-only)
 
-Read **Verified Integrator**, **Context**, **Requested host** and **Approval covers**. Choose one certificate, note its SHA-256 fingerprint, set the duration in seconds, and choose **Approve**. The site obtains the certificate from the authenticated TLS connection and returns its fingerprint. A capture from the demo returned:
+Read **Integrator**, **Account**, **Context**, **Requested host** and **Approval covers** under **Checked by Countersign**. Choose one certificate, note its SHA-256 fingerprint, pick a duration, check **Access ends**, and choose **Approve**. The site obtains the certificate from the authenticated TLS connection and returns its fingerprint. A capture from the demo returned:
 
 ```json
 {"fingerprint":"c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b","subject":"Demo user"}
@@ -49,6 +49,6 @@ Each launch creates fresh certificates. Compare the response to the fingerprint 
 
 ## End access
 
-Choose **Revoke access** under the approval in the Companion. Wait for **Broker recorded revocation**, then type `curl` again. A new connection from that Workload should fail. An explicit **Request access** from the Integrator starts a fresh approval. Type `quit` at the launcher prompt to remove the demo containers and disposable local state.
+In the Companion, open **Integrators**, choose the demo Integrator and choose **Revoke access** under the approval. Wait for **Broker recorded revocation**, then type `curl` again. A new connection from that Workload should fail. An explicit **Request access** from the Integrator starts a fresh approval. Type `quit` at the launcher prompt to remove the demo containers and disposable local state.
 
-If the request stalls, first look for **Connected** in the Companion, then for a pending request under **Approval requests**. An empty certificate list points to desktop identity discovery. A request that fails after approval needs a check of upstream trust and certificate acceptance. [Companion troubleshooting](companion.md#when-an-approval-doesnt-work) · [Integrator troubleshooting](integrate.md)
+If the request stalls, first look for **Connected** in the Companion, then for a pending request on the **Requests** tab. An empty certificate list points to desktop identity discovery. A request that fails after approval needs a check of upstream trust and certificate acceptance. [Companion troubleshooting](companion.md#when-an-approval-doesnt-work) · [Integrator troubleshooting](integrate.md)

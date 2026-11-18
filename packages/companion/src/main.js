@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, safeStorage, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +7,21 @@ import { integratorOrigin, approvalHint, displayText } from './origins.js';
 import { readTheme } from './theme.js';
 import { startsAtLogin, setStartAtLogin } from './login.js';
 import { PairingStore } from './store.js';
+import { windowPalette } from './palette.js';
+import { orderQueue } from './queue.js';
 
 const require = createRequire(import.meta.url);
 const path = relative => fileURLToPath(new URL(relative, import.meta.url));
 const rendererUrl = new URL('index.html', import.meta.url).href;
 const sessions = new Map();
-let win, tray, store, native, exiting = false, pendingHint, accountConfirmation;
+let win, tray, store, native, exiting = false, pendingHint, accountConfirmation, appearance = null;
+// The window background follows the OS appearance and, while one is on
+// screen, the theme of the pairing the renderer reports. The colour comes
+// from the stored theme, never from the renderer.
+function background() {
+  return windowPalette(sessions.get(appearance)?.record.theme ?? null, nativeTheme.shouldUseDarkColors).ground;
+}
+function paint() { if (win && !win.isDestroyed()) win.setBackgroundColor(background()); }
 function changed() { if (!win?.isDestroyed()) win?.webContents.send('desktop:changed'); }
 function show() { win?.show(); win?.focus(); }
 function handleHint(raw) {
@@ -35,7 +44,7 @@ function attach(record) {
     confirmAccount: (origin, user, code) => new Promise(resolve => {
       accountConfirmation?.finish(false);
       const timer = setTimeout(() => confirmation.finish(false), 55000);
-      const confirmation = { id: randomUUID(), origin, user, code, finish: answer => {
+      const confirmation = { id: randomUUID(), pairing: record.id, origin, user, code, finish: answer => {
         clearTimeout(timer);
         if (accountConfirmation === confirmation) accountConfirmation = undefined;
         resolve(answer);
@@ -102,7 +111,9 @@ function installHandlers() {
       pairings: all.filter(s => s.record.pairing).map(s => ({
         id:s.record.id, origin:s.record.origin, user:s.record.user, status:s.status,
         theme:s.record.theme, pendingTheme:s.record.pendingTheme,
-        devices:s.devices.filter(d=>d.binding.pairing!==s.record.pairing),
+        // The Broker lists every Companion on the account. This computer is
+        // the one holding this pairing's own binding.
+        devices:s.devices.map(d => ({...d, self:d.binding.pairing===s.record.pairing})),
         notices:s.notices,
         approvals:Object.entries(s.record.receipts ?? {}).filter(([,r]) => r.until > Date.now() || r.revocation === 'pending').map(([id,r]) => ({
           id, host:r.host || r.scope.pattern, scope:r.scope.pattern, context:r.workload.context, until:r.until,
@@ -110,18 +121,20 @@ function installHandlers() {
           ready:[...s.activations.values()].includes(id),
         })),
       })),
-      confirmation: accountConfirmation && {id:accountConfirmation.id,origin:accountConfirmation.origin,
-        user:accountConfirmation.user,code:accountConfirmation.code},
-      pending: all.filter(s => !s.record.pairing).map(s => s.record.origin + ' · ' + s.status).join('\n'),
+      confirmation: accountConfirmation && {id:accountConfirmation.id,pairing:accountConfirmation.pairing,
+        origin:accountConfirmation.origin,user:accountConfirmation.user,code:accountConfirmation.code,
+        theme:sessions.get(accountConfirmation.pairing)?.record.theme ?? null},
+      pending: all.filter(s => !s.record.pairing).map(s => ({id:s.record.id, origin:s.record.origin,
+        status:s.status, code:s.code ?? null, theme:s.record.theme ?? null})),
       login: startsAtLogin(app),
-      offers: all.flatMap(s => [...s.offers.values()].filter(o => o.body.expires_at_ms > Date.now()).map(o => ({
-        handle:o.handle, origin:s.record.origin, user:s.record.user, theme:s.record.theme,
+      offers: orderQueue(all.flatMap(s => [...s.offers.values()].filter(o => o.body.expires_at_ms > Date.now()).map(o => ({
+        handle:o.handle, received:o.received, pairing:s.record.id, origin:s.record.origin, user:s.record.user, theme:s.record.theme,
         context:o.body.workload.context, host:o.body.initiating_host, scope:o.body.scope.pattern,
         providerUnavailable:o.providerUnavailable,
         maxDuration:o.body.max_duration_s, defaultDuration:o.body.default_duration_s,
         identities:o.identities.map(i => ({reference:i.selection, identity:certLabel(i.subject), issuer:certLabel(i.issuer),
           expiresAt:i.expiresAtMs, fingerprint:Buffer.from(i.certSha256,'base64').toString('hex')})),
-      }))),
+      })))),
     };
   });
   let enrolling = false;
@@ -154,15 +167,20 @@ function installHandlers() {
     if (typeof enabled !== 'boolean') throw new TypeError();
     setStartAtLogin(app, enabled);
   });
-  action('theme', async (id,digest) => {
-    const s = sessions.get(id);
-    if (!s) throw new Error('Unknown pairing.');
-    await store.update(id, r => {
-      if (!r?.pendingTheme || r.pendingTheme.digest !== digest) throw new Error('Branding changed.');
-      return {...r, theme:r.pendingTheme, pendingTheme:null};
-    });
-    s.record = store.get(id);
-    changed();
+  function review(accept) {
+    return async (id, digest) => {
+      const s = sessions.get(id);
+      if (!s?.record.pairing || typeof digest !== 'string') throw new Error('Unknown pairing.');
+      await s.reviewBrand(digest, accept);
+      paint();
+    };
+  }
+  action('theme', review(true));
+  action('keepTheme', review(false));
+  action('appearance', id => {
+    if (id !== null && !sessions.has(id)) throw new Error('Unknown pairing.');
+    appearance = id;
+    paint();
   });
   action('forgetOthers', (id, ids, all) => {
     const s = sessions.get(id);
@@ -188,6 +206,8 @@ function installHandlers() {
     await native.retirePairingKey(session.record.locator);
     await store.update(id, () => null);
     sessions.delete(id);
+    if (appearance === id) appearance = null;
+    paint();
     changed();
   });
   action('forget', async id => {
@@ -204,7 +224,7 @@ function installHandlers() {
 function newWindow() {
   win = new BrowserWindow({width:660,height:760,minWidth:400,minHeight:400,show:false,
     icon:path('../assets/icon.png'),
-    backgroundColor:'#f7f8f6',webPreferences:{preload:path('preload.cjs'),sandbox:true,contextIsolation:true,
+    backgroundColor:background(),webPreferences:{preload:path('preload.cjs'),sandbox:true,contextIsolation:true,
       nodeIntegration:false,webSecurity:true,webviewTag:false}});
   win.webContents.setWindowOpenHandler(() => ({action:'deny'}));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -226,6 +246,7 @@ if (!app.requestSingleInstanceLock()) {
     store = new PairingStore(app.getPath('userData'),safeStorage);
     await store.load();
     installHandlers();
+    nativeTheme.on('updated', paint);
     await newWindow();
     // The macOS template picks up the menu bar's current color and Retina scale.
     const trayIcon = process.platform === 'darwin'

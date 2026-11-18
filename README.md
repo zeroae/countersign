@@ -5,7 +5,10 @@
 
 Give a remote job temporary access to an HTTPS service that requires a client certificate installed on your desktop. You choose the certificate, destination scope, and duration in the Companion. Your machine signs the TLS handshake. Your Integrator’s Gateway completes it and can read the traffic.
 
-<img src="docs/assets/screenshots/approval-selected.png" width="520" alt="Countersign approval showing the Integrator branding, verified Integrator, requested host, two certificates, a selected fingerprint, duration, and Approve and Deny controls.">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/approval-selected-dark.png">
+  <img src="docs/assets/screenshots/approval-selected.png" width="520" alt="Countersign approval in the Integrator's colours, showing its name beside the verified origin, the checked request facts, two certificates with a selected fingerprint, duration presets, when access ends, and Deny and Approve controls.">
+</picture>
 
 **[Try it with curl](https://zeroae.github.io/countersign/try/).** Pair the Companion with the demo Integrator, pick one of the installed certificates, and compare its fingerprint with the one returned by the mTLS site. The demo runs its services and curl in Docker Compose. The Companion runs on your Linux desktop.
 

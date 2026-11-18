@@ -51,66 +51,367 @@
       ]
     }
   },
-  "approval-selected.png": {
+  "approval-selected-dark.png": {
     "scale": 2,
-    "width": 704,
-    "height": 713,
+    "width": 660,
+    "height": 1140,
     "boxes": {
       "selected": [
-        32,
-        402.6,
-        672,
-        491.6
+        24,
+        660.3,
+        636,
+        791.9
       ],
       "expiry": [
-        19,
-        569.8,
-        300,
-        588.8
+        24,
+        898.2,
+        636,
+        954
       ],
-      "branding": [
-        19,
-        17,
-        685,
-        97.2
+      "header": [
+        20,
+        12,
+        429,
+        66
+      ],
+      "plate": [
+        514.2,
+        1108,
+        650,
+        1134
+      ],
+      "facts": [
+        24,
+        225.3,
+        636,
+        422.7
+      ],
+      "presets": [
+        24,
+        842.2,
+        636,
+        886.2
+      ]
+    }
+  },
+  "approval-selected.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 1140,
+    "boxes": {
+      "selected": [
+        24,
+        660.3,
+        636,
+        791.9
+      ],
+      "expiry": [
+        24,
+        898.2,
+        636,
+        954
+      ],
+      "header": [
+        20,
+        12,
+        429,
+        66
+      ],
+      "plate": [
+        514.2,
+        1108,
+        650,
+        1134
+      ],
+      "facts": [
+        24,
+        225.3,
+        636,
+        422.7
+      ],
+      "presets": [
+        24,
+        842.2,
+        636,
+        886.2
+      ]
+    }
+  },
+  "approval-unselected-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 1140,
+    "boxes": {
+      "identities": [
+        24,
+        444.7,
+        636,
+        791.9
+      ],
+      "actions": [
+        362,
+        1045,
+        636,
+        1089
+      ],
+      "queue": [
+        24,
+        132,
+        636,
+        150.1
       ]
     }
   },
   "approval-unselected.png": {
     "scale": 2,
-    "width": 704,
-    "height": 678,
+    "width": 660,
+    "height": 1140,
     "boxes": {
       "identities": [
-        32,
-        313.6,
-        672,
-        491.6
-      ],
-      "approve": [
-        19,
-        623.8,
-        109.3,
-        660.1
+        24,
+        444.7,
+        636,
+        791.9
       ],
       "actions": [
-        19,
-        623.8,
-        182.9,
-        660.1
+        362,
+        1045,
+        636,
+        1089
+      ],
+      "queue": [
+        24,
+        132,
+        636,
+        150.1
+      ]
+    }
+  },
+  "branding-alternate-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 952,
+    "boxes": {
+      "header": [
+        20,
+        12,
+        391.9,
+        66
+      ],
+      "approve": [
+        504,
+        857,
+        636,
+        901
       ]
     }
   },
   "branding-alternate.png": {
     "scale": 2,
-    "width": 704,
-    "height": 609,
+    "width": 660,
+    "height": 952,
     "boxes": {
-      "branding": [
-        19,
-        17,
-        685,
-        82.2
+      "header": [
+        20,
+        12,
+        391.9,
+        66
+      ],
+      "approve": [
+        504,
+        857,
+        636,
+        901
+      ]
+    }
+  },
+  "branding-none-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 927,
+    "boxes": {
+      "brand": [
+        20,
+        18,
+        191.2,
+        56
+      ],
+      "note": [
+        24,
+        379.7,
+        533.5,
+        394.7
+      ]
+    }
+  },
+  "branding-none.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 927,
+    "boxes": {
+      "brand": [
+        20,
+        18,
+        191.2,
+        56
+      ],
+      "note": [
+        24,
+        379.7,
+        533.5,
+        394.7
+      ]
+    }
+  },
+  "branding-review-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "review": [
+        41,
+        276.3,
+        619,
+        383.4
+      ],
+      "buttons": [
+        41,
+        419.5,
+        351.4,
+        455.5
+      ]
+    }
+  },
+  "branding-review.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "review": [
+        41,
+        276.3,
+        619,
+        383.4
+      ],
+      "buttons": [
+        41,
+        419.5,
+        351.4,
+        455.5
+      ]
+    }
+  },
+  "dialog-remove-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "dialog": [
+        120,
+        270.9,
+        540,
+        489.1
+      ]
+    }
+  },
+  "dialog-remove.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "dialog": [
+        120,
+        270.9,
+        540,
+        489.1
+      ]
+    }
+  },
+  "integrator-detail-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 930,
+    "boxes": {
+      "notice": [
+        41,
+        249.6,
+        619,
+        332.1
+      ],
+      "approvals": [
+        41,
+        368.8,
+        619,
+        635.5
+      ],
+      "self": [
+        341.6,
+        684,
+        446.5,
+        701
+      ]
+    }
+  },
+  "integrator-detail.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 930,
+    "boxes": {
+      "notice": [
+        41,
+        249.6,
+        619,
+        332.1
+      ],
+      "approvals": [
+        41,
+        368.8,
+        619,
+        635.5
+      ],
+      "self": [
+        341.6,
+        684,
+        446.5,
+        701
+      ]
+    }
+  },
+  "integrators-list-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "rows": [
+        24,
+        121.2,
+        636,
+        347
+      ],
+      "pair": [
+        24,
+        383.6,
+        636,
+        450.5
+      ]
+    }
+  },
+  "integrators-list.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "rows": [
+        24,
+        121.2,
+        636,
+        347
+      ],
+      "pair": [
+        24,
+        383.6,
+        636,
+        450.5
       ]
     }
   },
@@ -178,29 +479,129 @@
       ]
     }
   },
+  "pairing-companion-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 760,
+    "boxes": {
+      "facts": [
+        24,
+        197.2,
+        636,
+        310
+      ],
+      "code": [
+        24,
+        324,
+        636,
+        455.9
+      ]
+    }
+  },
   "pairing-companion.png": {
     "scale": 2,
-    "width": 760,
-    "height": 299,
+    "width": 660,
+    "height": 760,
     "boxes": {
-      "confirmation": [
-        28,
-        210.7,
-        482.3,
-        229.7
+      "facts": [
+        24,
+        197.2,
+        636,
+        310
+      ],
+      "code": [
+        24,
+        324,
+        636,
+        455.9
+      ]
+    }
+  },
+  "queue-switch-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 1004,
+    "boxes": {
+      "banner": [
+        24,
+        132,
+        636,
+        171.6
+      ],
+      "approve": [
+        504,
+        909,
+        636,
+        953
+      ],
+      "reason": [
+        24,
+        913.2,
+        318.9,
+        947
+      ]
+    }
+  },
+  "queue-switch.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 1004,
+    "boxes": {
+      "banner": [
+        24,
+        132,
+        636,
+        171.6
+      ],
+      "approve": [
+        504,
+        909,
+        636,
+        953
+      ],
+      "reason": [
+        24,
+        913.2,
+        318.9,
+        947
+      ]
+    }
+  },
+  "scope-wildcard-dark.png": {
+    "scale": 2,
+    "width": 660,
+    "height": 1047,
+    "boxes": {
+      "scope": [
+        41,
+        358,
+        619,
+        405.7
+      ],
+      "warning": [
+        41,
+        417.7,
+        619,
+        500.2
       ]
     }
   },
   "scope-wildcard.png": {
     "scale": 2,
-    "width": 704,
-    "height": 624,
+    "width": 660,
+    "height": 1047,
     "boxes": {
       "scope": [
-        19,
-        229.4,
-        401.5,
-        273
+        41,
+        358,
+        619,
+        405.7
+      ],
+      "warning": [
+        41,
+        417.7,
+        619,
+        500.2
       ]
     }
   },
