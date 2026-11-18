@@ -49,7 +49,7 @@ From the job environment configured with `HTTPS_PROXY` and the sidecar's public 
 curl --fail --show-error https://ledger.partner.example/statements/latest
 ```
 
-[![First protected request. The Workload waits for approval, the Companion acknowledges the grant, and the Gateway requests a native signature after verifying the site.](assets/diagrams/first-request.svg)](assets/diagrams/first-request.svg)
+[![First protected request in three phases. Request and approval: the Workload's CONNECT waits while the Broker notifies the Companion and the user picks a certificate. Upstream handshake: the Gateway verifies the site, then gets the handshake signed by the Companion through the Broker. Application traffic: the request and response flow through the Gateway.](assets/diagrams/first-request.svg#gh-light-mode-only)](assets/diagrams/first-request.svg)[![First protected request in three phases. Request and approval: the Workload's CONNECT waits while the Broker notifies the Companion and the user picks a certificate. Upstream handshake: the Gateway verifies the site, then gets the handshake signed by the Companion through the Broker. Application traffic: the request and response flow through the Gateway.](assets/diagrams/first-request-dark.svg#gh-dark-mode-only)](assets/diagrams/first-request-dark.svg)
 
 With two or more eligible identities the analyst must select one before **Approve** becomes available. A wildcard destination normally prompts for the exact requested host. If the administrator enables whole-wildcard approval, the prompt shows both the initiating host and the broader scope. The certificate's private key stays on the analyst's machine. [Companion approval screen](companion.md)
 

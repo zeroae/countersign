@@ -63,6 +63,7 @@ markdown_extensions:
       permalink: true
 exclude_docs: |
   /specs/
+  /assets/screenshots/raw/
 validation:
   nav:
     omitted_files: warn
