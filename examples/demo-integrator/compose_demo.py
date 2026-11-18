@@ -129,7 +129,7 @@ def record_job(state, url, completed):
     staged.replace(target)
 
 
-def verify(desktop, browser, origin, fixture, curl):
+def verify(desktop, browser, origin, fixture, curl, state, url):
     from playwright.sync_api import sync_playwright, expect
     with sync_playwright() as pw:
         session=pw.chromium.connect_over_cdp(desktop)
@@ -161,6 +161,15 @@ def verify(desktop, browser, origin, fixture, curl):
                 if workload.returncode or json.loads(output)["fingerprint"]!=fingerprint:
                     raise RuntimeError("Upstream did not accept the selected native certificate")
                 print("Compose mTLS accepted selected SHA-256 "+fingerprint,flush=True)
+                # The Integrator's job page reads the result the launcher records.
+                record_job(state,url,subprocess.CompletedProcess(curl,workload.returncode,output,""))
+                job=web.new_page()
+                job.goto(origin+"/job")
+                expect(job.locator("#job-fingerprint")).to_have_text(fingerprint)
+                job.get_by_label("SHA-256 you selected in the Companion").fill(fingerprint)
+                job.get_by_role("button",name="Compare").click()
+                expect(job.locator("#match")).to_be_visible()
+                print("Job page shows the fingerprint the site received",flush=True)
             finally:
                 if workload.poll() is None:
                     workload.terminate()
@@ -237,7 +246,7 @@ def session(args):
         url="https://site.test:9444/"
         curl=[*compose,"run","--rm","-T","workload","--fail","--silent","--show-error","--max-time","95",url]
         if args.verify:
-            verify(desktop_endpoint,browser_endpoint,origin,fixture,curl)
+            verify(desktop_endpoint,browser_endpoint,origin,fixture,curl,state,url)
             return
         print(f"Enter {origin} in the Companion and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
         print("Enter the Companion pairing code in the browser and confirm the pairing in the Companion.")
