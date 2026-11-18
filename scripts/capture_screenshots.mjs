@@ -50,7 +50,7 @@ const harbor = { digest: 'harbor', name: manifest.displayName, copy: manifest.co
 // A second fictional Integrator, to show that branding belongs to the pairing.
 // It sets no dark colours, so the Companion derives them.
 const lantern = { digest: 'lantern', name: 'Lantern Audit', copy: 'Engagement evidence room',
-  accent: '#9a4a0c', background: '#fbefe2', logo: null };
+  accent: '#d9822b', background: '#fdf6ee', logo: null };
 const lanternNext = { digest: 'lantern-2', name: 'Lantern Audit', copy: 'Evidence room for FY26 fieldwork',
   accent: '#7a3e9d', background: '#f4edf9', logo: null };
 const AUDIT = 'https://audit.example';
