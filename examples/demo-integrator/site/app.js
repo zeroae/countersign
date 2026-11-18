@@ -8,7 +8,7 @@ const widget = document.querySelector('countersign-widget');
 const PENDING_MS = 10 * 60 * 1000; // the Broker's deadline for a pending offer
 const REMEMBER = 'harbor-ledger-approval';
 const page = { session: null, devices: [], id: null, status: null, requestedAt: null,
-  revoked: false, renewal: false, justPaired: false, timer: 0 };
+  revoked: false, renewal: false, justPaired: false, requestShown: false, timer: 0 };
 
 const show = msg => { $('message').textContent = msg; };
 const fill = (selector, value) => { for (const node of document.querySelectorAll(selector)) node.textContent = value; };
@@ -82,6 +82,14 @@ function render() {
     pair: 'Pairing', pending: 'Waiting for you', active: 'Access approved', ended: 'Access ended' }[current] ??
     'Approve with your desktop';
   widget.toggleAttribute('paired', paired);
+  // The widget keeps its Open Companion link until it is reset. Once the
+  // request stops pending, replacing the adapter clears the stale link.
+  if (current === 'pending') page.requestShown = true;
+  else if (page.requestShown) {
+    page.requestShown = false;
+    const adapter = widget.adapter;
+    widget.adapter = adapter;
+  }
 
   $('home-title').textContent = paired ? 'Companion paired' : 'Use your client certificate for this job';
   $('home-body').textContent = page.justPaired ?
