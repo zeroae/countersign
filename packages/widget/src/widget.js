@@ -1,5 +1,62 @@
 import { approvalLink, isRequestId } from './hints.js';
 
+// Default look: a Countersign card with a purple band. Every value is a custom
+// property or a shadow part, so an Integrator can restyle it from the page.
+// light-dark() follows the page's color-scheme; a page that declares none
+// keeps the light palette.
+const STYLE = `
+  :host {
+    --_band: var(--countersign-band, #2b0548);
+    --_band-ink: var(--countersign-band-ink, #ffffff);
+    --_surface: var(--countersign-surface, light-dark(#faf8fc, #1d1724));
+    --_line: var(--countersign-line, light-dark(#d9cfe2, #3d3149));
+    --_ink: var(--countersign-ink, light-dark(#251c2b, #ece4f2));
+    --_muted: var(--countersign-muted, light-dark(#54485e, #c3b5cf));
+    --_primary: var(--countersign-primary, light-dark(#224805, #a1ca7c));
+    --_primary-ink: var(--countersign-primary-ink, light-dark(#ffffff, #14240a));
+    --_link: var(--countersign-accent, light-dark(#442063, #c49bdf));
+    display: block;
+    font-family: var(--countersign-font, system-ui, sans-serif);
+    color: var(--_ink);
+  }
+  [hidden] { display: none !important; }
+  [part=card] { border: 1px solid var(--_line); border-radius: 10px; overflow: hidden; background: var(--_surface); }
+  [part=header] { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--_band); color: var(--_band-ink); }
+  [part=mark] { width: 22px; height: 22px; fill: currentColor; flex: none; }
+  .divider { width: 1px; height: 20px; background: currentColor; opacity: .7; }
+  [part=wordmark] { font-size: 1.125em; font-weight: 300; letter-spacing: .02em; line-height: 1; }
+  [part=body] { display: flex; flex-direction: column; gap: 14px; padding: 18px 16px 20px; }
+  [part=headline] { margin: 0; font-size: 1.375em; font-weight: 300; line-height: 1.25; }
+  [part=actions] { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, a { font: inherit; font-size: .9375em; }
+  button { min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--_line);
+    background: var(--_surface); color: var(--_ink); cursor: pointer; }
+  button[part~=primary] { background: var(--_primary); border-color: var(--_primary); color: var(--_primary-ink); font-weight: 600; }
+  button:disabled { cursor: default; opacity: .55; }
+  button[part~=link] { order: 1; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--_link); text-decoration: underline; }
+  a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; color: var(--_link); }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--_link); outline-offset: 2px; }
+  [part=status] { margin: 0; font-size: .9375em; line-height: 1.45; color: var(--_muted); }
+  [role=status]:empty { display: none; }
+`;
+
+// A constructed stylesheet is not an inline <style>, so pages with a strict
+// style-src Content Security Policy still get the default look.
+let sheet;
+function adoptStyles(root) {
+  if (typeof CSSStyleSheet === 'function' && 'replaceSync' in CSSStyleSheet.prototype && 'adoptedStyleSheets' in root) {
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      sheet.replaceSync(STYLE);
+    }
+    root.adoptedStyleSheets = [sheet];
+  } else {
+    const style = root.ownerDocument.createElement('style');
+    style.textContent = STYLE;
+    root.prepend(style);
+  }
+}
+
 // The Integrator supplies a session-bound backend adapter. It owns the user,
 // Context, CSRF protection and any explanation of a denied request.
 export class CountersignWidget extends HTMLElement {
@@ -7,28 +64,40 @@ export class CountersignWidget extends HTMLElement {
   #generation = 0;
   #busy = false;
 
+  static observedAttributes = ['paired'];
+
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `
-      <style>
-        :host { display: inline-block; font-family: var(--countersign-font, system-ui, sans-serif); }
-        [part=actions] { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-        button, a { font: inherit; }
-        a { color: var(--countersign-accent, LinkText); }
-        [role=status]:empty { display: none; }
-      </style>
-      <div part="actions">
-        <button type="button" data-action="pair">Pair Companion</button>
-        <button type="button" data-action="connect">Request access</button>
-        <a part="launch" hidden>Open Companion</a>
-        <button type="button" data-action="push" hidden>Enable notifications</button>
-      </div>
-      <p role="status" part="status"></p>`;
+      <div part="card" role="group" aria-label="Countersign">
+        <div part="header" aria-hidden="true">
+          <svg part="mark" viewBox="0 0 32 32"><rect x="3" y="8" width="18" height="6"/><rect x="11" y="18" width="18" height="6"/></svg>
+          <span class="divider"></span>
+          <span part="wordmark">countersign</span>
+        </div>
+        <div part="body">
+          <p part="headline"><slot name="headline">Approve with your desktop</slot></p>
+          <div part="actions">
+            <button type="button" data-action="pair">Pair Companion</button>
+            <button type="button" data-action="connect">Request access</button>
+            <a part="launch" hidden>Open Companion</a>
+            <button type="button" data-action="push" hidden>Enable notifications</button>
+          </div>
+          <p role="status" part="status"></p>
+        </div>
+      </div>`;
+    adoptStyles(root);
     root.addEventListener('click', event => {
-      const action = event.target.dataset?.action;
+      const action = event.target.closest?.('[data-action]')?.dataset.action;
       if (action) void this.#run(action);
     });
+    this.#renderControls();
+  }
+
+  // `paired` moves the primary emphasis from Pair Companion to Request access
+  // and turns pairing into a secondary "Pair another computer" link.
+  attributeChangedCallback() {
     this.#renderControls();
   }
 
@@ -72,7 +141,13 @@ export class CountersignWidget extends HTMLElement {
   }
 
   #renderControls() {
+    const paired = this.hasAttribute('paired');
+    const primary = paired ? 'connect' : 'pair';
     for (const button of this.shadowRoot.querySelectorAll('button')) {
+      const action = button.dataset.action;
+      const style = action === primary ? ' primary' : action === 'pair' ? ' link' : '';
+      button.setAttribute('part', 'button ' + action + style);
+      if (action === 'pair') button.textContent = paired ? 'Pair another computer' : 'Pair Companion';
       button.disabled = !this.#adapter || this.#busy;
       if (button.dataset.action === 'push') {
         button.hidden = typeof this.#adapter?.subscribe !== 'function';

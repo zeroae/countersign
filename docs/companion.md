@@ -26,7 +26,7 @@ The two confirmation screens are illustrated in the [demo walkthrough](try.md#pa
 
 Open the local notification, choose **Open Companion** on the Integrator's site, or open the tray app. Read the verified origin and account first, then check that the Context corresponds to the job you started. **Requested host** identifies the immediate connection. **Approval covers** describes every destination the job can reach with this grant.
 
-[![Real Linux Companion with the second of two identically named certificates selected, the SHA-256 fingerprint, duration, and decision controls.](assets/screenshots/approval-selected.png)](assets/screenshots/approval-selected.png)
+[![Companion with the second of two identically named certificates selected, its SHA-256 fingerprint, the duration, the resulting expiry and the decision controls.](assets/screenshots/approval-selected.png)](assets/screenshots/approval-selected.png)
 
 The Companion lists the eligible installed certificates. With **two or more**, you must select one before **Approve** becomes available. Use the issuer, expiry and SHA-256 fingerprint to distinguish identical names. With one eligible certificate, it is selected and still needs your approval. If none qualify, you can deny or resolve the provider issue. Only the selected public chain is sent to the Broker.
 

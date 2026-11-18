@@ -20,20 +20,22 @@ Replace the app path with your executable. If you have Chromium installed, you c
 
 ## Pair the desktop
 
+The screenshots below are rendered from fixtures with the example names from [Add Countersign to a service](integrate.md): origin `https://portal.example`, account `u-42` and host `ledger.partner.example:443`. Your run shows the printed `https://localhost` origin, `demo-user` and `site.test:9444`.
+
 1. Enter the printed HTTPS origin in the Companion’s **Integrator origin** field. Choose **Pair**.
 2. In the browser tab opened by the Companion, sign in with the temporary secret from the printed file. Enter the pairing code shown in the Companion and choose **Confirm pairing**.
 
-   ![Demo Integrator browser page asking for the code shown in the Companion.](assets/screenshots/pairing-browser.png)
+   ![Harbor Ledger, the demo Integrator, asking for the code shown in the Companion, with the Countersign widget beside the form.](assets/screenshots/pairing-browser.png#gh-light-mode-only)![Harbor Ledger, the demo Integrator, asking for the code shown in the Companion, with the Countersign widget beside the form.](assets/screenshots/pairing-browser-dark.png#gh-dark-mode-only)
 
 3. In the Companion, check that the origin and account belong to this demo. Choose **Confirm pairing**. The paired Integrator should show **Connected**.
 
-   ![Packaged Companion asking the user to confirm the demo account and verified Integrator origin.](assets/screenshots/pairing-companion.png)
+   ![Companion asking the user to confirm the verified Integrator origin, the account and the pairing code.](assets/screenshots/pairing-companion.png)
 
 ## Choose a certificate and verify it
 
 Type `curl` at the launcher's prompt. The Workload already has the proxy address and the public sidecar CA. The first request waits while you decide.
 
-![Linux Companion listing identically named certificates for the same host with Approve disabled before selection.](assets/screenshots/approval-unselected.png)
+![Companion listing two identically named certificates for the same host, with Approve disabled until one is selected.](assets/screenshots/approval-unselected.png)
 
 Read **Verified Integrator**, **Context**, **Requested host** and **Approval covers**. Choose one certificate, note its SHA-256 fingerprint, set the duration in seconds, and choose **Approve**. The site obtains the certificate from the authenticated TLS connection and returns its fingerprint. A capture from the demo returned:
 
@@ -41,7 +43,9 @@ Read **Verified Integrator**, **Context**, **Requested host** and **Approval cov
 {"fingerprint":"c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b","subject":"Demo user"}
 ```
 
-Each launch creates fresh certificates. Compare the response to the fingerprint you selected in **your** run. Matching subject names alone cannot identify the key that signed the handshake.
+Each launch creates fresh certificates. Compare the response to the fingerprint you selected in **your** run. Matching subject names alone cannot identify the key that signed the handshake. The launcher also hands the result to the Integrator: open **Job result** on the demo page, paste the SHA-256 from the approval in your Companion and choose **Compare**.
+
+![Harbor Ledger's job result page showing the fingerprint the site received and a confirmation that it matches the pasted SHA-256 of the approved certificate.](assets/screenshots/job-result.png#gh-light-mode-only)![Harbor Ledger's job result page showing the fingerprint the site received and a confirmation that it matches the pasted SHA-256 of the approved certificate.](assets/screenshots/job-result-dark.png#gh-dark-mode-only)
 
 ## End access
 

@@ -12,13 +12,17 @@
   --md-accent-fg-color: #a1ca7c;
   --md-typeset-a-color: #c49bdf;
 }
+/* Screenshots are captured at 2x (see scripts/capture_screenshots.mjs).
+   Fit them to the column, keep tall Companion prompts within one screen, and
+   set no `display`: Material hides the off-theme -dark/-light variant with an
+   equally specific rule. */
 .md-typeset img[src*="/screenshots/"] {
-  display: block;
   width: auto;
-  max-width: min(100%, 33rem);
-  max-height: 40rem;
-  margin: 1rem 0;
+  height: auto;
+  max-width: 100%;
+  max-height: 44rem;
   border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: .25rem;
 }
 .md-typeset h1 .wordmark {
   vertical-align: middle;

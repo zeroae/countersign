@@ -64,10 +64,18 @@ const { id, state } = await brokerPost("requests", {
 
 Return the approval ID to the page. An explicit request joins a matching pending approval or returns its current approved record. After denial, cancellation or expiry, an explicit request starts a fresh approval. If the original CONNECT timed out, the Workload must deliberately issue another request after approval. [Widget adapter and notification handlers](reference/widget.md)
 
-![The web widget with pairing, access and Companion launch controls](assets/screenshots/widget.png)
+![The demo Integrator's page beside the Countersign widget, which shows Request access, an Open Companion link for the pending request and a Pair another computer link.](assets/screenshots/widget.png#gh-light-mode-only)![The demo Integrator's page beside the Countersign widget, which shows Request access, an Open Companion link for the pending request and a Pair another computer link.](assets/screenshots/widget-dark.png#gh-dark-mode-only)
+
+The widget draws only the pairing, request and launch controls in its own Countersign card. Your page explains the job, the pairing and what happens next. [Restyle the widget](reference/widget.md#style-the-web-controls)
 
 ## Show progress and end access
 
 Query `status` with the session-derived user ID and the approval ID. Show “Approved” for a committed decision, “Ready for handshakes” when `ready` is true, and “Upstream accepted mTLS” only after `upstream_mtls_accepted` is true. Closing the Companion can leave an existing leased connection usable until its authority expires. A fresh handshake needs the winning Companion online. [Status fields and failure handling](reference/api.md#read-approval-status)
 
-Retire the Workload when the job exits. Close the Context when the reconciliation itself ends. To withdraw one grant earlier, revoke its approval ID. In the demo, the upstream requires a client certificate and returns the leaf fingerprint it actually received. Compare it with the identity selected in the Companion. [Demo upstream](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/upstream.js)
+![The demo Integrator's access page with the three progress steps Approved, Ready for handshakes and Upstream accepted mTLS, and Renew and Revoke access controls.](assets/screenshots/access-active.png#gh-light-mode-only)![The demo Integrator's access page with the three progress steps Approved, Ready for handshakes and Upstream accepted mTLS, and Renew and Revoke access controls.](assets/screenshots/access-active-dark.png#gh-dark-mode-only)
+
+Retire the Workload when the job exits. Close the Context when the reconciliation itself ends. To withdraw one grant earlier, revoke its approval ID. After a denial, expiry or revocation, say how access ended and offer a fresh request.
+
+![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and pointing to the widget's Request access button for a fresh approval.](assets/screenshots/access-ended.png#gh-light-mode-only)![The demo Integrator's page after revocation, explaining that open connections close by their lease deadline and pointing to the widget's Request access button for a fresh approval.](assets/screenshots/access-ended-dark.png#gh-dark-mode-only)
+
+ In the demo, the upstream requires a client certificate and returns the leaf fingerprint it actually received. Compare it with the identity selected in the Companion. [Demo upstream](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/upstream.js)

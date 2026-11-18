@@ -92,15 +92,38 @@ On logout, remove the subscription through the authenticated backend while the a
 
 ## Style the web controls
 
-`--countersign-font` sets the widget font and `--countersign-accent` sets the launch-link color. The component exposes `actions`, `launch` and `status` shadow parts. Page styles apply inside the browser.
+By default the widget draws a Countersign card: a purple band with the Countersign mark, a headline, the buttons and a status line. The emphasized button is **Pair Companion** until you add the `paired` attribute, then **Request access**, with pairing offered as a **Pair another computer** link. The stylesheet is a constructed stylesheet in the shadow root, so it also applies under a strict `style-src` Content Security Policy. Its colours follow the page's `color-scheme`: a page that declares `color-scheme: light dark` gets the dark palette in dark mode, and a page that declares nothing stays light.
+
+```html
+<countersign-widget paired>
+  <span slot="headline">Ready to request access</span>
+</countersign-widget>
+```
+
+| Hook | Use |
+| --- | --- |
+| `paired` attribute | Set it when the signed-in account already has a paired Companion. It moves the primary emphasis to **Request access** and turns **Pair Companion** into a secondary **Pair another computer** link, since the same account can pair more than one computer. |
+| `headline` slot | Replaces the default headline, “Approve with your desktop”. Use it for state only your page knows, such as pending or ended access. |
+| `--countersign-font` | Font family for the whole card. |
+| `--countersign-accent` | Colour of the **Open Companion** link and focus rings. |
+| `--countersign-band`, `--countersign-band-ink` | Header band background and its mark and wordmark. |
+| `--countersign-surface`, `--countersign-line`, `--countersign-ink`, `--countersign-muted` | Card background, borders, text and status text. |
+| `--countersign-primary`, `--countersign-primary-ink` | Background and text of the emphasized button. |
+
+Shadow parts let page styles replace any rule. `card`, `header`, `mark`, `wordmark`, `body`, `headline`, `actions`, `status` and `launch` (the **Open Companion** link) name the regions. Every button has the part `button` plus `pair`, `connect` or `push`. The emphasized one also has `primary`, and the **Pair another computer** link of a paired widget has `link`.
 
 ```css
 countersign-widget {
   --countersign-font: system-ui, sans-serif;
   --countersign-accent: #235a44;
 }
+countersign-widget::part(card) { border-radius: 0; }
+countersign-widget::part(button) { border-radius: 999px; }
+countersign-widget::part(primary) { background: #235a44; border-color: #235a44; }
 countersign-widget::part(status) { margin-block: .5rem; }
 ```
+
+Keep the controls recognisable as Countersign's. Page explanations, such as whether the Companion is offline or why access ended, belong outside the widget. The demo page shows one way to lay them out beside it. [Demo page](https://github.com/zeroae/countersign/blob/main/examples/demo-integrator/site/index.html)
 
 ## Brand the Companion prompt
 
@@ -125,8 +148,8 @@ Serve a UTF-8 JSON manifest at `https://<integrator-origin>/.well-known/counters
 
 The manifest has an 8 KiB limit. The Companion stores accepted branding with its pairing. A changed manifest appearance or changed logo image is presented for review. The user can keep the old appearance. On first pairing, an unavailable or invalid manifest leaves the verified origin visible with neutral branding. [Theme validation](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/packages/companion/src/theme.js)
 
-![Companion approval for Demo Integrator, with the Integrator branding banner highlighted](../assets/screenshots/approval-branding.png)
+![Companion approval for Harbor Ledger, the demo Integrator, with its blue branding banner and logo highlighted](../assets/screenshots/approval-branding.png)
 
-![The same Companion approval screen for Harbor Ledger, with its different branding banner highlighted](../assets/screenshots/branding-alternate.png)
+![The same Companion approval screen for Lantern Audit, a second fictional Integrator, with its amber branding banner highlighted](../assets/screenshots/branding-alternate.png)
 
 Compare the branding area in the two prompts. The verified origin, exact host and approval scope, selected certificate, duration and **Approve**/**Deny** controls are drawn by the Companion.
