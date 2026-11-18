@@ -82,7 +82,7 @@ The GitHub environments `crates-io` and `npm` accept deployments from tags match
 
 ### Cut a release
 
-Set the workspace version and internal dependency requirements in `Cargo.toml` and the version in `packages/widget/package.json`. Refresh and commit `Cargo.lock` with the version changes. From the reviewed commit, push the matching tag (for example, `v0.1.0`). The registry workflow checks that tag against every public package before either upload job starts. It builds the Rust archives, tests the widget and loads both exports from an installation of the npm tarball. On a release tag it also runs the Rust workspace tests.
+Set the workspace version and internal dependency requirements in `Cargo.toml` and the version in `packages/widget/package.json`. Refresh and commit `Cargo.lock` with the version changes. From the reviewed commit, push the matching tag (for example, `v0.1.0`). The registry workflow checks that tag against every public package before either upload job starts. It builds the Rust archives, tests the widget and loads both exports from an installation of the npm tarball. Pull requests and release tags both run the Rust workspace tests on the release runner.
 
 Cargo uploads dependencies before their consumers. npm publishes the tested tarball with provenance and uses `latest` for stable releases and `next` for prereleases such as `v0.2.0-rc.1`. If an upload fails, rerun the failed job on the same tag. Each registry job checks existing versions against the tested archives and skips matching uploads. A checksum conflict requires investigation before continuing.
 
