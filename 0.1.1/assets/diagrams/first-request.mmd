@@ -1,0 +1,27 @@
+sequenceDiagram
+    accTitle: A first protected request
+    accDescr: A pending proxy connection leads to a user decision, a scoped signing request, and the site's authenticated response.
+    participant W as Workload
+    participant G as Gateway
+    participant B as Broker
+    participant C as Companion
+    participant S as Site
+    W->>G: CONNECT
+    G->>B: Bind job and host
+    B-->>C: Notify with ID
+    C->>B: Fetch offer
+    Note over C: User picks a certificate and duration
+    C->>B: Approve and send chain
+    B->>C: Activate grant
+    C-->>B: Ready
+    G->>B: Look up grant and acquire leases
+    G->>S: Begin upstream TLS
+    S-->>G: Server proof and client certificate request
+    Note over G: Verify server
+    G->>B: Request signature
+    B->>C: Sign handshake
+    C-->>B: Native signature
+    B-->>G: Verified signature
+    G->>S: Finish mTLS and send HTTP request
+    S-->>G: HTTP response
+    G-->>W: HTTP response
