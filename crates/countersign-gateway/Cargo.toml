@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 license.workspace = true
+readme = "README.md"
 repository.workspace = true
 description = "Forward proxy for user-approved client certificate authentication"
 

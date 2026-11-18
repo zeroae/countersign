@@ -1,3 +1,4 @@
+site_url: https://zeroae.github.io/countersign/
 site_name: Countersign
 site_description: Desktop approval for HTTPS workloads that use an installed client certificate.
 repo_name: zeroae/countersign
@@ -49,6 +50,9 @@ nav:
 
 plugins:
   - search
+extra:
+  version:
+    provider: mike
 extra_css:
   - stylesheets/handbook.css
 markdown_extensions:

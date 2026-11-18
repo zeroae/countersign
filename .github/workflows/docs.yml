@@ -1,10 +1,11 @@
 name: Documentation
 on:
   pull_request:
-    paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', '.github/workflows/docs.yml']
+    paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', 'scripts/version_handbook.py', '.github/workflows/docs.yml']
   push:
     branches: [main]
-    paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', '.github/workflows/docs.yml']
+    tags: ['v*']
+    paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', 'scripts/version_handbook.py', '.github/workflows/docs.yml']
 
 permissions:
   contents: read
@@ -26,3 +27,38 @@ jobs:
           name: countersign-handbook
           path: site/
           if-no-files-found: error
+  deploy:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: handbook
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - run: python -m pip install -r requirements-docs.txt
+      - name: Add the release to the handbook archive
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python scripts/version_handbook.py "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/handbook"
+          git push origin gh-pages
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/handbook
+      - id: deployment
+        uses: actions/deploy-pages@v4

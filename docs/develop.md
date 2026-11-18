@@ -50,7 +50,7 @@ python3 -m venv .venv
 .venv/bin/python -m mkdocs serve
 ```
 
-The build writes a static site in `site/`. The documentation workflow runs the strict build on documentation PRs and attaches a `countersign-handbook` artifact. To read a downloaded artifact, extract it and run `python3 -m http.server --bind 127.0.0.1` from the directory containing `index.html`.
+The build writes a static site in `site/`. Version tags add a handbook snapshot to the `gh-pages` branch and deploy the archive to [GitHub Pages](https://zeroae.github.io/countersign/). Use the version selector for an exact release. For example, `/0.1.0/` stays at that release, `/0.1/` follows stable patches in the 0.1 series, and `/latest/` follows the newest stable release. Unversioned handbook links open the latest stable page. The documentation workflow runs the strict build on documentation PRs and attaches a `countersign-handbook` artifact. To read a downloaded artifact, extract it and run `python3 -m http.server --bind 127.0.0.1` from the directory containing `index.html`.
 
 The architecture and deployment diagrams are editable SVGs in `docs/assets/diagrams/`. The two sequence diagrams have Mermaid sources in the same directory. To regenerate the first-request sequence, run this from the checkout root with Chromium available to Mermaid CLI.
 
@@ -98,3 +98,5 @@ After the first release, add a GitHub Actions trusted publisher in the settings 
 | npm | `npm` | Allow direct `npm publish` for `@zeroae/countersign-widget`. |
 
 Delete the bootstrap secrets from GitHub and revoke both temporary tokens at their registries. Subsequent tags authenticate with the GitHub job's short-lived OIDC identity. Set up the npm publisher within two days of its first OIDC release, or recreate the configuration if it expires. [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) · [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+
+The desktop distribution workflow packs the native installer on each of the six release runners and installs its npm archive into a clean consumer project. It checks the installed payload against the original binary. On a release, `distribution.yml` publishes the six `@zeroae/countersign-{linux,darwin,win32}-{x64,arm64}` packages before `@zeroae/countersign`. For trusted publishing, configure those seven npm packages with workflow filename `distribution.yml` and environment `npm`. The widget uses `publish.yml`.

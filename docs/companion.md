@@ -61,3 +61,7 @@ If another Companion connects to your account, its entry includes connection inf
 | Provider unavailable | Unlock the native provider and reconnect the token if applicable. On Linux verify that p11-kit can see the token in the same login session. Request access again. |
 | Approved, but the job still cannot connect | Look for **Ready for handshakes** on the approving desktop. If the original connection attempt timed out, retry it from the job. The Integrator can distinguish an approval from an accepted upstream handshake. |
 | Revocation queued | Reconnect to the verified Integrator and use **Retry revocation**. If the desktop cannot reconnect, revoke through the Integrator. The lease cutoff starts from the Broker's recorded decision. |
+
+## Install from npm
+
+Run `npx @zeroae/countersign` on the desktop. npm downloads the platform package for your Node architecture (x64 or ARM64). The command opens the installer on Windows and macOS, or runs the AppImage on Linux. To locate the file for manual installation, run `npx @zeroae/countersign --print-path`. The binary ships inside the npm tarball.

@@ -70,6 +70,7 @@ jobs:
           (cd packages/widget && npm pack --ignore-scripts --pack-destination ../../archives)
           for archive in archives/*.crate; do
             name=$(basename "$archive" .crate)
+            tar -xOf "$archive" "$name/README.md" | cmp - "crates/${name%%-[0-9]*}/README.md"
             tar -xOf "$archive" "$name/LICENSE" | cmp - LICENSE
           done
           tar -xOf archives/*.tgz package/LICENSE | cmp - LICENSE
