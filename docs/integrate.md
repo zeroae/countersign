@@ -64,7 +64,7 @@ const { id, state } = await brokerPost("requests", {
 
 Return the approval ID to the page. An explicit request joins a matching pending approval or returns its current approved record. After denial, cancellation or expiry, an explicit request starts a fresh approval. If the original CONNECT timed out, the Workload must deliberately issue another request after approval. [Widget adapter and notification handlers](reference/widget.md)
 
-![The demo Integrator's page beside the Countersign widget, which shows Pair Companion, Request access and an Open Companion link for the pending request.](assets/screenshots/widget.png#gh-light-mode-only)![The demo Integrator's page beside the Countersign widget, which shows Pair Companion, Request access and an Open Companion link for the pending request.](assets/screenshots/widget-dark.png#gh-dark-mode-only)
+![The demo Integrator's page beside the Countersign widget, which shows Request access, an Open Companion link for the pending request and a Pair another computer link.](assets/screenshots/widget.png#gh-light-mode-only)![The demo Integrator's page beside the Countersign widget, which shows Request access, an Open Companion link for the pending request and a Pair another computer link.](assets/screenshots/widget-dark.png#gh-dark-mode-only)
 
 The widget draws only the pairing, request and launch controls in its own Countersign card. Your page explains the job, the pairing and what happens next. [Restyle the widget](reference/widget.md#style-the-web-controls)
 

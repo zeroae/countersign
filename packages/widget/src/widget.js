@@ -33,6 +33,7 @@ const STYLE = `
     background: var(--_surface); color: var(--_ink); cursor: pointer; }
   button[part~=primary] { background: var(--_primary); border-color: var(--_primary); color: var(--_primary-ink); font-weight: 600; }
   button:disabled { cursor: default; opacity: .55; }
+  button[part~=link] { order: 1; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--_link); text-decoration: underline; }
   a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; color: var(--_link); }
   button:focus-visible, a:focus-visible { outline: 3px solid var(--_link); outline-offset: 2px; }
   [part=status] { margin: 0; font-size: .9375em; line-height: 1.45; color: var(--_muted); }
@@ -94,7 +95,8 @@ export class CountersignWidget extends HTMLElement {
     this.#renderControls();
   }
 
-  // `paired` moves the primary emphasis from Pair Companion to Request access.
+  // `paired` moves the primary emphasis from Pair Companion to Request access
+  // and turns pairing into a secondary "Pair another computer" link.
   attributeChangedCallback() {
     this.#renderControls();
   }
@@ -139,10 +141,13 @@ export class CountersignWidget extends HTMLElement {
   }
 
   #renderControls() {
-    const primary = this.hasAttribute('paired') ? 'connect' : 'pair';
+    const paired = this.hasAttribute('paired');
+    const primary = paired ? 'connect' : 'pair';
     for (const button of this.shadowRoot.querySelectorAll('button')) {
       const action = button.dataset.action;
-      button.setAttribute('part', 'button ' + action + (action === primary ? ' primary' : ''));
+      const style = action === primary ? ' primary' : action === 'pair' ? ' link' : '';
+      button.setAttribute('part', 'button ' + action + style);
+      if (action === 'pair') button.textContent = paired ? 'Pair another computer' : 'Pair Companion';
       button.disabled = !this.#adapter || this.#busy;
       if (button.dataset.action === 'push') {
         button.hidden = typeof this.#adapter?.subscribe !== 'function';

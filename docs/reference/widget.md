@@ -92,7 +92,7 @@ On logout, remove the subscription through the authenticated backend while the a
 
 ## Style the web controls
 
-By default the widget draws a Countersign card: a purple band with the Countersign mark, a headline, the buttons and a status line. The emphasized button is **Pair Companion** until you add the `paired` attribute, then **Request access**. The stylesheet is a constructed stylesheet in the shadow root, so it also applies under a strict `style-src` Content Security Policy. Its colours follow the page's `color-scheme`: a page that declares `color-scheme: light dark` gets the dark palette in dark mode, and a page that declares nothing stays light.
+By default the widget draws a Countersign card: a purple band with the Countersign mark, a headline, the buttons and a status line. The emphasized button is **Pair Companion** until you add the `paired` attribute, then **Request access**, with pairing offered as a **Pair another computer** link. The stylesheet is a constructed stylesheet in the shadow root, so it also applies under a strict `style-src` Content Security Policy. Its colours follow the page's `color-scheme`: a page that declares `color-scheme: light dark` gets the dark palette in dark mode, and a page that declares nothing stays light.
 
 ```html
 <countersign-widget paired>
@@ -102,7 +102,7 @@ By default the widget draws a Countersign card: a purple band with the Countersi
 
 | Hook | Use |
 | --- | --- |
-| `paired` attribute | Set it when the signed-in account already has a paired Companion. It moves the primary emphasis to **Request access**. |
+| `paired` attribute | Set it when the signed-in account already has a paired Companion. It moves the primary emphasis to **Request access** and turns **Pair Companion** into a secondary **Pair another computer** link, since the same account can pair more than one computer. |
 | `headline` slot | Replaces the default headline, “Approve with your desktop”. Use it for state only your page knows, such as pending or ended access. |
 | `--countersign-font` | Font family for the whole card. |
 | `--countersign-accent` | Colour of the **Open Companion** link and focus rings. |
@@ -110,7 +110,7 @@ By default the widget draws a Countersign card: a purple band with the Countersi
 | `--countersign-surface`, `--countersign-line`, `--countersign-ink`, `--countersign-muted` | Card background, borders, text and status text. |
 | `--countersign-primary`, `--countersign-primary-ink` | Background and text of the emphasized button. |
 
-Shadow parts let page styles replace any rule. `card`, `header`, `mark`, `wordmark`, `body`, `headline`, `actions`, `status` and `launch` (the **Open Companion** link) name the regions. Every button has the part `button` plus `pair`, `connect` or `push`, and the emphasized one also has `primary`.
+Shadow parts let page styles replace any rule. `card`, `header`, `mark`, `wordmark`, `body`, `headline`, `actions`, `status` and `launch` (the **Open Companion** link) name the regions. Every button has the part `button` plus `pair`, `connect` or `push`. The emphasized one also has `primary`, and the **Pair another computer** link of a paired widget has `link`.
 
 ```css
 countersign-widget {

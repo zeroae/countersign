@@ -64,11 +64,14 @@ test('default card exposes stylable parts and keeps the original ones', () => {
 test('a paired account moves the primary emphasis to Request access', () => {
   const el = widget(async () => id);
   const part = action => el.shadowRoot.querySelector(`[data-action=${action}]`).getAttribute('part');
+  const pair = el.shadowRoot.querySelector('[data-action=pair]');
   el.setAttribute('paired', '');
-  assert.equal(part('pair'), 'button pair');
+  assert.equal(part('pair'), 'button pair link');
+  assert.equal(pair.textContent, 'Pair another computer');
   assert.equal(part('connect'), 'button connect primary');
   el.removeAttribute('paired');
   assert.equal(part('pair'), 'button pair primary');
+  assert.equal(pair.textContent, 'Pair Companion');
   el.remove();
 });
 

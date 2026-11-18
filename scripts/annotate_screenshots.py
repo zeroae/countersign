@@ -66,7 +66,7 @@ CALLOUTS: dict[str, tuple[str, list[tuple[str, ...]]]] = {
         ("progress", "Status from the Broker", "above-end"),
     ]),
     "access-ended.png": ("access-ended.png", [
-        ("again", "Starts a fresh approval", "below-end"),
+        ("again", "Starts a fresh approval", "right"),
     ]),
     "job-result.png": ("job-result.png", [
         ("match", "Same SHA-256 as the approval", "right"),
