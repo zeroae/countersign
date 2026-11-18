@@ -35,11 +35,16 @@ jobs:
           fi
       - name: Test release and retry decisions
         run: python3 -m unittest discover -s scripts -p 'test_registry_release.py'
-      - run: sudo apt-get update && sudo apt-get install -y libnss3-dev bubblewrap
+      - run: sudo apt-get update && sudo apt-get install -y libnss3-dev bubblewrap apparmor-profiles
+      - name: Enable the distribution's bubblewrap profile when the host restricts user namespaces
+        run: |
+          if ! bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true; then
+            sudo apparmor_parser --replace /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+            bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true
+          fi
       - run: pnpm --filter @zeroae/countersign-widget... install --frozen-lockfile
       - run: pnpm --filter @zeroae/countersign-widget test
-      - if: github.ref_type == 'tag'
-        run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked
       - name: Build packages from their archives
         run: |
           cargo package --locked --workspace
