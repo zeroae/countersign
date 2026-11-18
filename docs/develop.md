@@ -86,6 +86,8 @@ Set the workspace version and internal dependency requirements in `Cargo.toml` a
 
 Cargo uploads dependencies before their consumers. npm publishes the tested tarball with provenance and uses `latest` for stable releases and `next` for prereleases such as `v0.2.0-rc.1`. If an upload fails, rerun the failed job on the same tag. Each registry job checks existing versions against the tested archives and skips matching uploads. A checksum conflict requires investigation before continuing.
 
+If a failure requires a workflow fix after the release tag is public, merge the fix and push a tag named `registry-retry/vX.Y.Z` at the fixed commit. Permit that exact retry tag in both registry environments. The workflow fetches the original `vX.Y.Z` tag, pins the upload jobs to its commit, and checks that the workflow revision contains the same widget sources for npm provenance. Desktop and container distribution continues to use the original release tag.
+
 ### Switch to trusted publishing
 
 After the first release, add a GitHub Actions trusted publisher in the settings of **each crate** and the **npm widget**. Use owner `zeroae`, repository `countersign`, workflow filename `publish.yml`, and the environment below.
