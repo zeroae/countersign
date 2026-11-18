@@ -1,4 +1,4 @@
-# Countersign
+# ![Countersign](assets/wordmark.svg){ .wordmark } { #countersign }
 
 A remote job can authenticate to an mTLS site using a client certificate on your desktop. You approve a particular certificate, host and duration. The desktop signs each new handshake through the operating system’s key provider. The Integrator runs the Gateway that carries the job’s traffic.
 

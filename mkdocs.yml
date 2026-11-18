@@ -5,8 +5,8 @@ repo_url: https://github.com/zeroae/countersign
 
 theme:
   name: material
-  logo: assets/countersign.png
-  favicon: assets/countersign.png
+  logo: assets/mark-white.svg
+  favicon: assets/app-icon.svg
   font: false
   icon:
     repo: fontawesome/brands/github

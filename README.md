@@ -1,4 +1,7 @@
-# Countersign
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wordmark-white.svg">
+  <img src="docs/assets/wordmark.svg" width="360" alt="Countersign">
+</picture></h1>
 
 Give a remote job temporary access to an HTTPS service that requires a client certificate installed on your desktop. You choose the certificate, destination scope, and duration in the Companion. Your machine signs the TLS handshake. Your Integrator’s Gateway completes it and can read the traffic.
 
