@@ -11,6 +11,8 @@ Give a remote job temporary access to an HTTPS service that requires a client ce
 
 ## Use Countersign
 
+Run `npx @zeroae/countersign` to open the desktop installer on Windows or macOS, or launch the AppImage on Linux. npm selects the x64 or ARM64 binary for the running Node process.
+
 | If you… | Start here |
 |---|---|
 | Received a pairing or approval request | [Install and use the Companion](https://zeroae.github.io/countersign/companion/) |

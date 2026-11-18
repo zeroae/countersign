@@ -57,6 +57,10 @@ def publish_crates(directory, version, packages):
 
 def publish_widget(directory, version, name):
     archive, = directory.glob("*.tgz")
+    publish_npm_archive(archive, version, name)
+
+
+def publish_npm_archive(archive, version, name):
     checksum = hashlib.sha512(archive.read_bytes()).digest()
     integrity = "sha512-" + base64.b64encode(checksum).decode("ascii")
     registry = "https://registry.npmjs.org"

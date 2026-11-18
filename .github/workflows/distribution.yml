@@ -74,6 +74,14 @@ jobs:
           probe = "const a=require(process.argv[1]); if(typeof a.signTls!=='function'||typeof a.listIdentities!=='function')process.exit(1); console.log(process.versions.electron,process.arch)"
           subprocess.run([str(executable), "-e", probe, str(addon.resolve())],
                          env=dict(os.environ, ELECTRON_RUN_AS_NODE="1"), check=True, timeout=45)
+      - name: Pack and install the npm desktop packages
+        run: python distribution/npm/pack.py
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: npm-archives/*.tgz
+          if-no-files-found: error
       - name: Name the native prebuild
         shell: bash
         run: cp packages/companion/native/countersign-native.node countersign-native-${{ matrix.os }}-${{ matrix.arch }}.node
@@ -136,3 +144,28 @@ jobs:
           cd release
           sha256sum * > SHA256SUMS
           gh release create "$TAG" --repo "$REPO" --verify-tag --generate-notes ./*
+
+  npm-desktop:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-desktop-*
+          path: archives
+          merge-multiple: true
+      - name: Publish six binary packages, then the launcher
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: python scripts/publish_desktop.py
