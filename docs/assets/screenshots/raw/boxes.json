@@ -1,0 +1,245 @@
+{
+  "access-active-dark.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 764,
+    "boxes": {
+      "progress": [
+        49,
+        409.3,
+        574.8,
+        448.3
+      ]
+    }
+  },
+  "access-active.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 764,
+    "boxes": {
+      "progress": [
+        49,
+        409.3,
+        574.8,
+        448.3
+      ]
+    }
+  },
+  "access-ended-dark.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 650,
+    "boxes": {
+      "again": [
+        49,
+        544.4,
+        223.7,
+        588.4
+      ]
+    }
+  },
+  "access-ended.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 650,
+    "boxes": {
+      "again": [
+        49,
+        544.4,
+        223.7,
+        588.4
+      ]
+    }
+  },
+  "approval-selected.png": {
+    "scale": 2,
+    "width": 704,
+    "height": 713,
+    "boxes": {
+      "selected": [
+        32,
+        402.6,
+        672,
+        491.6
+      ],
+      "expiry": [
+        19,
+        569.8,
+        300,
+        588.8
+      ],
+      "branding": [
+        19,
+        17,
+        685,
+        97.2
+      ]
+    }
+  },
+  "approval-unselected.png": {
+    "scale": 2,
+    "width": 704,
+    "height": 678,
+    "boxes": {
+      "identities": [
+        32,
+        313.6,
+        672,
+        491.6
+      ],
+      "approve": [
+        19,
+        623.8,
+        109.3,
+        660.1
+      ],
+      "actions": [
+        19,
+        623.8,
+        182.9,
+        660.1
+      ]
+    }
+  },
+  "branding-alternate.png": {
+    "scale": 2,
+    "width": 704,
+    "height": 609,
+    "boxes": {
+      "branding": [
+        19,
+        17,
+        685,
+        82.2
+      ]
+    }
+  },
+  "job-result-dark.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 663,
+    "boxes": {
+      "compare": [
+        49,
+        296.3,
+        911,
+        451.4
+      ],
+      "match": [
+        49,
+        467.4,
+        462.5,
+        506.4
+      ]
+    }
+  },
+  "job-result.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 663,
+    "boxes": {
+      "compare": [
+        49,
+        296.3,
+        911,
+        451.4
+      ],
+      "match": [
+        49,
+        467.4,
+        462.5,
+        506.4
+      ]
+    }
+  },
+  "pairing-browser-dark.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 637,
+    "boxes": {
+      "code": [
+        49,
+        504.8,
+        440,
+        575.8
+      ]
+    }
+  },
+  "pairing-browser.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 637,
+    "boxes": {
+      "code": [
+        49,
+        504.8,
+        440,
+        575.8
+      ]
+    }
+  },
+  "pairing-companion.png": {
+    "scale": 2,
+    "width": 760,
+    "height": 299,
+    "boxes": {
+      "confirmation": [
+        28,
+        210.7,
+        482.3,
+        229.7
+      ]
+    }
+  },
+  "scope-wildcard.png": {
+    "scale": 2,
+    "width": 704,
+    "height": 624,
+    "boxes": {
+      "scope": [
+        19,
+        229.4,
+        401.5,
+        273
+      ]
+    }
+  },
+  "widget-dark.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 575,
+    "boxes": {
+      "page": [
+        24,
+        98,
+        615.9,
+        538.1
+      ],
+      "widget": [
+        635.9,
+        98,
+        936,
+        354.2
+      ]
+    }
+  },
+  "widget.png": {
+    "scale": 2,
+    "width": 960,
+    "height": 575,
+    "boxes": {
+      "page": [
+        24,
+        98,
+        615.9,
+        538.1
+      ],
+      "widget": [
+        635.9,
+        98,
+        936,
+        354.2
+      ]
+    }
+  }
+}

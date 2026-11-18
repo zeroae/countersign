@@ -10,4 +10,6 @@ export default [
   { files: ['packages/companion/src/**/*.js'], languageOptions: { globals: globals.node } },
   { files: ['packages/companion/src/renderer.js'], languageOptions: { globals: globals.browser } },
   { files: ['**/test/**/*.js'], languageOptions: { globals: globals.node } },
+  // Node scripts; the screenshot script also passes callbacks into the page.
+  { files: ['scripts/**/*.mjs'], languageOptions: { globals: { ...globals.node, ...globals.browser } } },
 ];
