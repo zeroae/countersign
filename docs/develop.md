@@ -52,16 +52,13 @@ python3 -m venv .venv
 
 The build writes a static site in `site/`. Version tags add a handbook snapshot to the `gh-pages` branch and deploy the archive to [GitHub Pages](https://zeroae.github.io/countersign/). Use the version selector for an exact release. For example, `/0.1.0/` stays at that release, `/0.1/` follows stable patches in the 0.1 series, and `/latest/` follows the newest stable release. Unversioned handbook links open the latest stable page. The documentation workflow runs the strict build on documentation PRs and attaches a `countersign-handbook` artifact. To read a downloaded artifact, extract it and run `python3 -m http.server --bind 127.0.0.1` from the directory containing `index.html`.
 
-The architecture and deployment diagrams are editable SVGs in `docs/assets/diagrams/`. The two sequence diagrams have Mermaid sources in the same directory. To regenerate the first-request sequence, run this from the checkout root with Chromium available to Mermaid CLI.
+Diagrams live in `docs/assets/diagrams/`, each with a light and a `-dark` variant. The architecture and deployment diagrams are hand-edited SVGs; the two sequence diagrams have Mermaid sources (`.mmd`). Every colour comes from `palette.json`, and the hand-edited SVGs reference it only through `var(--token)`. Edit the light SVG or the `.mmd` source, then regenerate both variants from the checkout root. Mermaid export needs Node and a Chromium that Puppeteer can launch; set `PUPPETEER_EXECUTABLE_PATH` to reuse an installed one.
 
 ```sh
-npx --yes --package=@mermaid-js/mermaid-cli@11.12.0 mmdc \
-  -i docs/assets/diagrams/first-request.mmd \
-  -o docs/assets/diagrams/first-request.svg \
-  -c docs/assets/diagrams/theme.json -I first-request -b white -q
+python3 scripts/render_diagrams.py
 ```
 
-Use `access-ends` for the lease timeline. Both GitHub and the static handbook display the exported SVG directly. Capture UI changes from a packaged Companion paired to a disposable demo account. Confirm the selected certificate against the peer fingerprint before updating the walkthrough. The original [design and decision record](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/docs/specs/2026-11-17-countersign-design.md) remains available to contributors.
+The pages embed both variants with the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, which GitHub and the handbook's theme toggle both honour. Capture UI changes from a packaged Companion paired to a disposable demo account. Save captures to `docs/assets/screenshots/raw/`, check the callout boxes in `scripts/annotate_screenshots.py` still frame the right rows, and run `uv run --with pillow scripts/annotate_screenshots.py` to write the annotated copies the pages embed. Confirm the selected certificate against the peer fingerprint before updating the walkthrough. The original [design and decision record](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/docs/specs/2026-11-17-countersign-design.md) remains available to contributors.
 
 ## What CI and release tags produce
 

@@ -125,8 +125,8 @@ Serve a UTF-8 JSON manifest at `https://<integrator-origin>/.well-known/counters
 
 The manifest has an 8 KiB limit. The Companion stores accepted branding with its pairing. A changed manifest appearance or changed logo image is presented for review. The user can keep the old appearance. On first pairing, an unavailable or invalid manifest leaves the verified origin visible with neutral branding. [Theme validation](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/packages/companion/src/theme.js)
 
-![Companion approval with an eligible certificate selected and Integrator branding](../assets/screenshots/approval-selected.png)
+![Companion approval for Demo Integrator, with the Integrator branding banner highlighted](../assets/screenshots/approval-branding.png)
 
-![Alternate Integrator branding inside the same Companion approval screen](../assets/screenshots/branding-alternate.png)
+![The same Companion approval screen for Harbor Ledger, with its different branding banner highlighted](../assets/screenshots/branding-alternate.png)
 
 Compare the branding area in the two prompts. The verified origin, exact host and approval scope, selected certificate, duration and **Approve**/**Deny** controls are drawn by the Companion.

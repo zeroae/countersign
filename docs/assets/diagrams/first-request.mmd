@@ -1,19 +1,24 @@
 sequenceDiagram
     accTitle: A first protected request
-    accDescr: A pending proxy connection leads to a user decision, a scoped signing request, and the site's authenticated response.
+    accDescr: Three phases. The Workload's CONNECT waits while the user approves a certificate in the Companion. The Gateway then verifies the site and gets the TLS handshake signed on the desktop through the Broker. Finally the request and response flow through the Gateway.
     participant W as Workload
     participant G as Gateway
     participant B as Broker
     participant C as Companion
     participant S as Site
+    rect rgb(246,242,249)
+    Note over W,S: Request and approval
     W->>G: CONNECT
     G->>B: Bind job and host
     B-->>C: Notify with ID
     C->>B: Fetch offer
     Note over C: User picks a certificate and duration
-    C->>B: Approve and send chain
+    C->>B: Approve, send chain
     B->>C: Activate grant
     C-->>B: Ready
+    end
+    rect rgb(242,246,239)
+    Note over W,S: Upstream handshake, signed on the desktop
     G->>B: Look up grant and acquire leases
     G->>S: Begin upstream TLS
     S-->>G: Server proof and client certificate request
@@ -22,6 +27,10 @@ sequenceDiagram
     B->>C: Sign handshake
     C-->>B: Native signature
     B-->>G: Verified signature
+    end
+    rect rgb(246,242,249)
+    Note over W,S: Application traffic
     G->>S: Finish mTLS and send HTTP request
     S-->>G: HTTP response
     G-->>W: HTTP response
+    end

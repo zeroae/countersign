@@ -28,10 +28,11 @@
 [data-md-color-scheme="slate"] .wordmark {
   filter: brightness(0) invert(1);
 }
+/* Diagrams carry their own light or dark background (see scripts/render_diagrams.py).
+   Show them at their drawn size, shrinking only to fit the column. No `display`
+   here: Material hides the off-theme variant with an equally specific rule. */
 .md-typeset img[src*="/diagrams/"] {
-  display: block;
-  width: 100%;
+  max-width: 100%;
   height: auto;
-  background: #fff;
   border-radius: .25rem;
 }

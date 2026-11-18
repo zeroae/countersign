@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 324" width="680" height="324" role="img" aria-labelledby="title desc">
+  <title id="title">Shared Gateway with two active grants</title>
+  <desc id="desc">Two Workloads authenticate to the shared Gateway parent. Each grant has its own isolated worker. The parent accesses the issuer and holds the real sockets. Solid arrows are application traffic; the dashed arrow is control.</desc>
+  <defs>
+    <marker id="data" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path class="head-traffic" d="M0 0 8 4 0 8Z"/></marker>
+    <marker id="control" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="head-control" d="M0 0 8 4 0 8Z"/></marker>
+  </defs>
+  <style>
+    /* palette:start */ svg{--bg:#1e2029;--text:#ece6f1;--muted:#bfb5c8;--zone-fill:#262230;--zone-stroke:#514660;--desk-fill:#1f2922;--desk-stroke:#4d6751;--surface:#2b2635;--actor-fill:#2f2939;--box-stroke:#a68bb6;--local-stroke:#86a889;--traffic:#c9a6e0;--control:#9cc98a;--note-text:#cfe5c0;--band-request:#28232f;--band-sign:#222a24;--font:DejaVu Sans, Verdana, sans-serif} /* palette:end */
+    text {font-family:var(--font);fill:var(--text)}
+    .bg {fill:var(--bg)}
+    .zone {fill:var(--zone-fill);stroke:var(--zone-stroke)}
+    .box {fill:var(--surface);stroke:var(--box-stroke)}
+    .zone-title {font-weight:bold;font-size:15px} .role {font-weight:bold;font-size:16px}
+    .detail {font-size:13px;fill:var(--muted)}
+    .label {font-size:13px;fill:var(--control);font-weight:bold}
+    .traffic {fill:none;stroke:var(--traffic);stroke-width:2;marker-end:url(#data)}
+    .ctrl {fill:none;stroke:var(--control);stroke-width:1.7;stroke-dasharray:5 4;marker-end:url(#control)}
+    .head-traffic {fill:var(--traffic)} .head-control {fill:var(--control)}
+  </style>
+  <rect class="bg" width="680" height="324"/>
+  <rect class="zone" x="211" y="11" width="460" height="219" rx="9"/>
+  <text class="zone-title" x="227" y="37">Shared Gateway host</text>
+  <g text-anchor="middle">
+    <rect class="box" x="13" y="53" width="154" height="53" rx="6"/>
+    <text class="role" x="90" y="76">Workload A</text>
+    <text class="detail" x="90" y="95">Token A</text>
+    <rect class="box" x="13" y="143" width="154" height="53" rx="6"/>
+    <text class="role" x="90" y="166">Workload B</text>
+    <text class="detail" x="90" y="185">Token B</text>
+    <rect class="box" x="241" y="81" width="175" height="92" rx="6"/>
+    <text class="role" x="328" y="108">Gateway parent</text>
+    <text class="detail" x="328" y="132">Authenticated listener</text>
+    <text class="detail" x="328" y="150">and real sockets</text>
+    <path class="traffic" d="M167 80H187V104H238"/>
+    <path class="traffic" d="M167 170H187V150H238"/>
+    <rect class="box" x="485" y="54" width="160" height="58" rx="6"/>
+    <text class="role" x="565" y="79">Worker A</text>
+    <text class="detail" x="565" y="99">Grant A only</text>
+    <rect class="box" x="485" y="142" width="160" height="58" rx="6"/>
+    <text class="role" x="565" y="167">Worker B</text>
+    <text class="detail" x="565" y="187">Grant B only</text>
+    <path class="traffic" d="M419 103H451V82H482" marker-start="url(#data)"/>
+    <path class="traffic" d="M419 151H451V171H482" marker-start="url(#data)"/>
+    <rect class="box" x="225" y="257" width="206" height="57" rx="6"/>
+    <text class="role" x="328" y="281">CA source</text>
+    <text class="detail" x="328" y="300">Local key or ACM-PCA API</text>
+    <path class="ctrl" d="M328 173V254"/>
+  </g>
+  <text class="label" x="340" y="216">Issue exact-host leaf</text>
+  <g class="legend">
+    <path class="traffic" d="M470 266H500"/>
+    <text class="detail" x="510" y="270">Application traffic</text>
+    <path class="ctrl" d="M470 294H500"/>
+    <text class="detail" x="510" y="298">Control</text>
+  </g>
+</svg>
