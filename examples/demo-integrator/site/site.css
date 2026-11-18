@@ -2,23 +2,23 @@
    <countersign-widget> keeps its own Countersign styling. */
 :root {
   color-scheme: light dark;
-  --ground: #f5f7f9; --surface: #ffffff; --line: #d5dde4; --ink: #13293d; --muted: #4b5d6e;
-  --brand: #1d5f8a; --brand-ink: #ffffff; --soft: #e6f0f7;
+  --ground: #f4f8f7; --surface: #ffffff; --line: #d3e0dd; --ink: #0f2a2a; --muted: #4a5f5d;
+  --brand: #0f6b6b; --brand-ink: #ffffff; --soft: #eef6f4;
   --warn-bg: #fdf3e3; --warn-ink: #6f4300; --warn-line: #e8c98f;
   --bad-bg: #fbeceb; --bad-ink: #8f2018; --bad-line: #e7b4ae;
   --good-bg: #e8f2ec; --good-ink: #1f5130; --good-line: #a9cdb5;
-  --pending-bg: #eef2f5; --pending-ink: #4b5d6e; --pending-line: #c9d3db;
+  --pending-bg: #eef4f3; --pending-ink: #4a5f5d; --pending-line: #c8d8d5;
   --sans: Inter, "Segoe UI", "Ubuntu Sans", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0f1820; --surface: #15212c; --line: #2a3a49; --ink: #e5edf4; --muted: #a4b4c3;
-    --brand: #7cb8e4; --brand-ink: #0b1a26; --soft: #183042;
+    --ground: #0f1f1e; --surface: #152826; --line: #29403d; --ink: #e3f0ee; --muted: #a2bcb8;
+    --brand: #5cc8bd; --brand-ink: #062120; --soft: #173533;
     --warn-bg: #33260f; --warn-ink: #f3cf8a; --warn-line: #6b5222;
     --bad-bg: #3a1714; --bad-ink: #ffb3ab; --bad-line: #6e2d27;
     --good-bg: #14301f; --good-ink: #a8dbb7; --good-line: #2f5c3d;
-    --pending-bg: #172430; --pending-ink: #a4b4c3; --pending-line: #2f4152;
+    --pending-bg: #162a28; --pending-ink: #a2bcb8; --pending-line: #2e4744;
   }
 }
 * { box-sizing: border-box; }
