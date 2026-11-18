@@ -50,7 +50,7 @@ python3 -m venv .venv
 .venv/bin/python -m mkdocs serve
 ```
 
-The build writes a static site in `site/`. The documentation workflow runs the strict build on documentation PRs and attaches a `countersign-handbook` artifact. To read a downloaded artifact, extract it and run `python3 -m http.server --bind 127.0.0.1` from the directory containing `index.html`.
+The build writes a static site in `site/`. Version tags publish the handbook to [GitHub Pages](https://zeroae.github.io/countersign/). The documentation workflow runs the strict build on documentation PRs and attaches a `countersign-handbook` artifact. To read a downloaded artifact, extract it and run `python3 -m http.server --bind 127.0.0.1` from the directory containing `index.html`.
 
 The architecture and deployment diagrams are editable SVGs in `docs/assets/diagrams/`. The two sequence diagrams have Mermaid sources in the same directory. To regenerate the first-request sequence, run this from the checkout root with Chromium available to Mermaid CLI.
 

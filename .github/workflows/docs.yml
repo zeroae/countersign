@@ -4,6 +4,7 @@ on:
     paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', '.github/workflows/docs.yml']
   push:
     branches: [main]
+    tags: ['v*']
     paths: ['docs/**', 'README.md', 'mkdocs.yml', 'requirements-docs.txt', '.github/workflows/docs.yml']
 
 permissions:
@@ -26,3 +27,24 @@ jobs:
           name: countersign-handbook
           path: site/
           if-no-files-found: error
+      - if: github.ref_type == 'tag'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: handbook
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

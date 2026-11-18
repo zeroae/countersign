@@ -1,6 +1,6 @@
 {
   "name": "@countersign/companion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Approve TLS client certificate use from your desktop",
   "private": true,
   "type": "module",
