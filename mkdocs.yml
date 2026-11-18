@@ -50,6 +50,9 @@ nav:
 
 plugins:
   - search
+extra:
+  version:
+    provider: mike
 extra_css:
   - stylesheets/handbook.css
 markdown_extensions:
