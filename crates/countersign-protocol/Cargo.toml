@@ -3,6 +3,9 @@ name = "countersign-protocol"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wire messages and destination policies for Countersign"
 
 [dependencies]
 base64 = "0.22"

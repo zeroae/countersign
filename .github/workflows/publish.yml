@@ -1,0 +1,128 @@
+name: Package registries
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+      - name: Verify package versions
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python3 scripts/registry_release.py check --tag "$GITHUB_REF_NAME"
+          else
+            python3 scripts/registry_release.py check
+          fi
+      - name: Test release and retry decisions
+        run: python3 -m unittest discover -s scripts -p 'test_registry_release.py'
+      - run: sudo apt-get update && sudo apt-get install -y libnss3-dev bubblewrap
+      - run: pnpm --filter @zeroae/countersign-widget... install --frozen-lockfile
+      - run: pnpm --filter @zeroae/countersign-widget test
+      - if: github.ref_type == 'tag'
+        run: cargo test --workspace --locked
+      - name: Build packages from their archives
+        run: |
+          cargo package --locked --workspace
+          mkdir archives
+          cp target/package/*.crate archives/
+          (cd packages/widget && npm pack --ignore-scripts --pack-destination ../../archives)
+          for archive in archives/*.crate; do
+            name=$(basename "$archive" .crate)
+            tar -xOf "$archive" "$name/LICENSE" | cmp - LICENSE
+          done
+          tar -xOf archives/*.tgz package/LICENSE | cmp - LICENSE
+      - name: Load the widget's public entry points from the tarball
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir widget-consumer
+          cd widget-consumer
+          npm install --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE"/archives/*.tgz
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          globalThis.HTMLElement = class {};
+          globalThis.customElements = { get() {}, define() {} };
+          const { subscribeForPush } = await import('@zeroae/countersign-widget');
+          const { installPushHandlers } = await import('@zeroae/countersign-widget/service-worker');
+          assert.equal(typeof subscribeForPush, 'function');
+          assert.equal(typeof installPushHandlers, 'function');
+          JS
+      - if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-packages
+          path: archives/
+          if-no-files-found: error
+
+  crates:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: crates-io
+    env:
+      USE_BOOTSTRAP: ${{ secrets.CRATES_IO_BOOTSTRAP_TOKEN != '' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-packages
+          path: archives
+      - name: Authenticate to crates.io
+        id: auth
+        if: env.USE_BOOTSTRAP != 'true'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_BOOTSTRAP_TOKEN || steps.auth.outputs.token }}
+        run: python3 scripts/registry_release.py crates --tag "$GITHUB_REF_NAME" --archives archives
+
+  npm:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-packages
+          path: archives
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish the tested widget tarball
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: python3 scripts/registry_release.py widget --tag "$GITHUB_REF_NAME" --archives archives
