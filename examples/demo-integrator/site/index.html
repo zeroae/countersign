@@ -1,14 +1,170 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Countersign demo</title><script type="module" src="/app.js"></script></head>
-<body><main>
-<h1>Demo Integrator</h1>
-<form id="login" hidden><label>Demo login secret <input name="password" type="password" required></label><button>Sign in</button></form>
-<section id="session" hidden>
-<p>Demo Context · site.test:9444</p>
-<form id="pair" hidden><label>Code from your Companion <input name="code" required></label><button>Confirm pairing</button></form>
-<button id="forget" hidden>Forget this Companion and revoke its grants</button>
-<countersign-widget></countersign-widget>
-<div id="grant" hidden><button id="status">Check status</button> <button id="renew">Renew</button> <button id="revoke">Revoke access</button></div>
-<button id="logout">Sign out</button>
-</section><p role="status" id="message"></p>
-</main></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Harbor Ledger · Countersign demo</title>
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<header class="masthead">
+  <a class="brand" href="/">
+    <svg class="brand-mark" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="8"/><path d="M7 21c3-3 5-3 7 0s4 3 6 0 4-3 7 0M11 15V9h12v6"/></svg>
+    <span class="brand-text"><strong>Harbor Ledger</strong><span>Client reporting workspace</span></span>
+  </a>
+  <nav class="site-nav" aria-label="Harbor Ledger" id="nav" hidden>
+    <a href="/" data-nav="home">Reconciliation</a>
+    <a href="/job" data-nav="job">Job result</a>
+    <a href="/countersign/devices" data-nav="devices">Devices</a>
+  </nav>
+  <div class="account" id="account" hidden>
+    <span>Signed in as <strong id="user"></strong></span>
+    <button type="button" class="btn ghost" id="logout">Sign out</button>
+  </div>
+</header>
+
+<main class="signin" id="login-view" hidden>
+  <form id="login" class="card stack">
+    <h1>Sign in</h1>
+    <p class="muted">This demo uses a temporary secret. The launcher printed the path of the file that holds it.</p>
+    <div class="field">
+      <label for="password">Demo login secret</label>
+      <input id="password" name="password" type="password" autocomplete="off" required>
+    </div>
+    <button class="btn">Sign in</button>
+  </form>
+</main>
+
+<main class="workspace" id="workspace" hidden>
+  <div class="column">
+    <section class="card stack" aria-labelledby="context-title" id="context">
+      <div class="title-row">
+        <div class="titles">
+          <span class="eyebrow">Context</span>
+          <h1 id="context-title"></h1>
+        </div>
+        <span class="chip" id="job-state"></span>
+      </div>
+      <dl class="facts">
+        <div><dt>Context ID</dt><dd class="mono" id="context-id"></dd></div>
+        <div><dt>Workload</dt><dd class="mono" id="workload"></dd></div>
+        <div><dt>Destination</dt><dd class="mono" data-host></dd></div>
+        <div><dt>Companion</dt><dd id="companion"></dd></div>
+      </dl>
+    </section>
+
+    <section class="card stack" data-view="home">
+      <h2 id="home-title"></h2>
+      <p class="muted" id="home-body"></p>
+    </section>
+
+    <section class="card stack" data-view="pair" aria-labelledby="pair-title">
+      <h2 id="pair-title">Pair your Companion</h2>
+      <ol class="steps">
+        <li>Open Countersign, choose <strong>Pair</strong>, and enter <span class="mono" data-origin></span></li>
+        <li>Type the code the Companion shows. You are signed in as <strong data-user></strong>.</li>
+        <li>Confirm the account in the Companion when it asks.</li>
+      </ol>
+      <form id="pair" class="inline-form">
+        <div class="field grow">
+          <label for="code">Code from your Companion</label>
+          <input id="code" name="code" class="code" autocomplete="off" spellcheck="false" required>
+        </div>
+        <button class="btn">Confirm pairing</button>
+      </form>
+    </section>
+
+    <section class="card stack" data-view="pending">
+      <h2>Waiting for your approval</h2>
+      <p class="muted">The job asked for <span class="mono ink" data-host></span>. Its first request waits while you choose a certificate and a duration in the Companion.</p>
+      <p class="muted" id="renewal" hidden>This renewal replaces the current approval, which stays usable until it ends.</p>
+      <div class="notice warn" role="status" id="offline" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3ZM12 10v4M12 17v.5"/></svg>
+        <div><strong>Your Companion isn’t connected</strong><span id="offline-body"></span></div>
+      </div>
+      <div class="actions"><button type="button" class="btn ghost" data-act="status">Check status</button></div>
+    </section>
+
+    <section class="card stack" data-view="active" aria-labelledby="active-title">
+      <h2 id="active-title">Access approved</h2>
+      <ul class="progress" aria-label="Progress">
+        <li data-step="approved">Approved</li>
+        <li data-step="ready">Ready for handshakes</li>
+        <li data-step="upstream">Upstream accepted mTLS</li>
+      </ul>
+      <dl class="facts">
+        <div><dt>Requested host</dt><dd class="mono" data-host></dd></div>
+        <div><dt>Approval ID</dt><dd class="mono" data-approval></dd></div>
+      </dl>
+      <p class="muted">Your Companion shows the certificate, its SHA-256 fingerprint and when this approval ends.</p>
+      <div class="actions">
+        <a class="btn" href="/job">View job result</a>
+        <button type="button" class="btn ghost" data-act="status">Check status</button>
+        <button type="button" class="btn ghost" data-act="renew">Renew</button>
+        <button type="button" class="btn danger" data-act="revoke">Revoke access</button>
+      </div>
+      <p class="fine">Closing the Companion can leave this connection usable until its lease expires. A new handshake needs the Companion online. <a id="forget-link" hidden></a></p>
+    </section>
+
+    <section class="card stack" data-view="ended">
+      <div class="notice bad" role="status">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>
+        <div><strong id="ended-title"></strong><span id="ended-body"></span></div>
+      </div>
+      <p class="muted">A new request starts a fresh approval. If the job’s original request already timed out, the job has to send another one after you approve.</p>
+      <div class="actions"><button type="button" class="btn" data-act="again">Request access again</button></div>
+    </section>
+
+    <section class="card stack" data-view="devices" aria-labelledby="devices-title">
+      <h2 id="devices-title">Paired Companions</h2>
+      <p class="muted">Forgetting a Companion removes its pairing and withdraws every grant it approved.</p>
+      <ul class="devices" id="devices"></ul>
+      <div class="actions"><button type="button" class="btn danger" id="forget" hidden>Forget this Companion and revoke its grants</button></div>
+    </section>
+
+    <p role="status" id="message" class="message"></p>
+  </div>
+
+  <aside class="widget-column" aria-label="Countersign">
+    <countersign-widget><span slot="headline" id="headline">Approve with your desktop</span></countersign-widget>
+  </aside>
+</main>
+
+<main class="job" id="job-view" hidden>
+  <section class="card stack" aria-labelledby="job-title">
+    <div class="title-row">
+      <div class="titles">
+        <span class="eyebrow" id="job-eyebrow"></span>
+        <h1 id="job-title"></h1>
+      </div>
+      <span class="chip" id="job-chip"></span>
+    </div>
+    <div class="request mono" id="job-request"></div>
+    <p class="muted" id="job-empty" hidden>No job has finished yet. In the demo launcher, type <span class="mono ink">curl</span>, approve the request in your Companion, then reload this page.</p>
+    <div class="stack" id="job-peer" hidden>
+      <h2>Which key signed the handshake?</h2>
+      <div class="pair-cards">
+        <div class="peer">
+          <span class="muted small">Fingerprint the site received</span>
+          <span class="fp" id="job-fingerprint"></span>
+          <span class="muted small" id="job-subject"></span>
+        </div>
+        <form class="peer" id="compare">
+          <label class="muted small" for="selected">SHA-256 you selected in the Companion</label>
+          <textarea id="selected" name="selected" class="fp-input" rows="2" autocomplete="off" spellcheck="false" placeholder="Paste from the approval in your Companion"></textarea>
+          <button class="btn ghost small-btn">Compare</button>
+        </form>
+      </div>
+      <p class="verdict good" role="status" id="match" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Fingerprints match — the site saw the key you approved</p>
+      <p class="verdict bad" role="status" id="mismatch" hidden>These fingerprints differ. The site did not see the certificate you selected.</p>
+      <p class="fine">Matching subject names alone can’t identify the key. Compare the full SHA-256 fingerprint.</p>
+    </div>
+    <div class="actions">
+      <a class="btn ghost" href="/">Back to access</a>
+    </div>
+  </section>
+</main>
+</body>
+</html>

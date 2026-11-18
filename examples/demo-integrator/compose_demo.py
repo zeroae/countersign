@@ -111,6 +111,24 @@ def devtools(child):
     return endpoints[0]
 
 
+def record_job(state, url, completed):
+    """Save the Workload's last result for the Integrator's /job page."""
+    result={"url":url,"ok":completed.returncode==0}
+    if result["ok"]:
+        try:
+            body=json.loads(completed.stdout)
+            result.update(http_status=200,fingerprint=str(body["fingerprint"]),subject=str(body["subject"]))
+        except (ValueError,KeyError,TypeError):
+            result.update(ok=False,error="The site returned an unexpected response.")
+    else:
+        lines=completed.stderr.strip().splitlines()
+        result["error"]=lines[-1] if lines else f"curl exited with status {completed.returncode}."
+    target=state/"integrator"/"job.json"
+    staged=target.with_suffix(".next")
+    staged.write_text(json.dumps(result))
+    staged.replace(target)
+
+
 def verify(desktop, browser, origin, fixture, curl):
     from playwright.sync_api import sync_playwright, expect
     with sync_playwright() as pw:
@@ -216,19 +234,24 @@ def session(args):
             return devtools(child) if args.verify else None
         browser_endpoint=start(browser_args+debug+[origin])
         desktop_endpoint=start([*prefix,str(app),"--user-data-dir="+str(state/"desktop"),"--password-store=gnome-libsecret",*debug])
-        curl=[*compose,"run","--rm","-T","workload","--fail","--silent","--show-error","--max-time","95",
-              "https://site.test:9444/"]
+        url="https://site.test:9444/"
+        curl=[*compose,"run","--rm","-T","workload","--fail","--silent","--show-error","--max-time","95",url]
         if args.verify:
             verify(desktop_endpoint,browser_endpoint,origin,fixture,curl)
             return
         print(f"Enter {origin} in the Companion and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
         print("Enter the Companion pairing code in the browser and confirm the pairing in the Companion.")
         print("Type curl below to request https://site.test:9444/. Choose a certificate and approve in the Companion.")
+        print(f"The Integrator's {origin}/job page shows the fingerprint the site received.")
         print("Type quit to remove this demo's containers, keys, trust anchor and profiles.")
         for line in sys.stdin:
             if line.strip()=="quit": return
             if line.strip()=="curl":
-                subprocess.run(curl,timeout=110)
+                completed=subprocess.run(curl,timeout=110,capture_output=True,text=True)
+                sys.stdout.write(completed.stdout+"\n")
+                sys.stderr.write(completed.stderr)
+                record_job(state,url,completed)
+                print(f"Result saved. Open {origin}/job to compare the fingerprint with your approval.",flush=True)
             else: print("Enter curl or quit.")
 
 
