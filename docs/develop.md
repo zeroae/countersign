@@ -75,9 +75,9 @@ A version tag publishes the five Rust crates `countersign-protocol`, `countersig
 
 ### Set up the first release
 
-The GitHub environments `crates-io` and `npm` accept deployments from tags matching `v*`. Add each bootstrap credential under **Settings → Environments** in the named environment.
+The GitHub environments `crates.io` and `npm` accept deployments from tags matching `v*`. Add each bootstrap credential under **Settings → Environments** in the named environment.
 
-1. Sign in to crates.io and verify your email. Create a short-lived API token with permission to publish **new crates** and new versions of the five crate names. Store it as `CRATES_IO_BOOTSTRAP_TOKEN` in the GitHub `crates-io` environment. The first successful upload establishes ownership of each name. [Cargo publishing guide](https://doc.rust-lang.org/cargo/reference/publishing.html)
+1. Sign in to crates.io and verify your email. Create a short-lived API token with permission to publish **new crates** and new versions of the five crate names. Store it as `CRATES_IO_BOOTSTRAP_TOKEN` in the GitHub `crates.io` environment. The first successful upload establishes ownership of each name. [Cargo publishing guide](https://doc.rust-lang.org/cargo/reference/publishing.html)
 2. Sign in to npm with an account authorized to create public packages in the `@zeroae` scope. For the first release, create a short-lived granular token with read/write access to packages in that scope and **Bypass two-factor authentication** enabled for CI. Save it as `NPM_BOOTSTRAP_TOKEN` in the GitHub `npm` environment. [npm access tokens](https://docs.npmjs.com/about-access-tokens/)
 
 ### Cut a release
@@ -94,7 +94,7 @@ After the first release, add a GitHub Actions trusted publisher in the settings 
 
 | Registry | GitHub environment | Publisher permissions |
 | --- | --- | --- |
-| crates.io | `crates-io` | Configure the publisher for each of the five crates. |
+| crates.io | `crates.io` | Configure the publisher for each of the five crates. |
 | npm | `npm` | Allow direct `npm publish` for `@zeroae/countersign-widget`. |
 
 Delete the bootstrap secrets from GitHub and revoke both temporary tokens at their registries. Subsequent tags authenticate with the GitHub job's short-lived OIDC identity. Set up the npm publisher within two days of its first OIDC release, or recreate the configuration if it expires. [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) · [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
