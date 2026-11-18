@@ -15,7 +15,7 @@ Each parent calls the Integrator's Broker over TLS. The Companion maintains its 
 
 ### Sidecar
 
-[![Sidecar process diagram. A single Workload reads the public CA from a read-only mount and reaches its Gateway over a private link.](assets/diagrams/sidecar.svg#gh-light-mode-only)](assets/diagrams/sidecar.svg)[![Sidecar process diagram. A single Workload reads the public CA from a read-only mount and reaches its Gateway over a private link.](assets/diagrams/sidecar-dark.svg#gh-dark-mode-only)](assets/diagrams/sidecar-dark.svg)
+![Sidecar process diagram. A single Workload reads the public CA from a read-only mount and reaches its Gateway over a private link.](assets/diagrams/sidecar.svg#gh-light-mode-only)![Sidecar process diagram. A single Workload reads the public CA from a read-only mount and reaches its Gateway over a private link.](assets/diagrams/sidecar-dark.svg#gh-dark-mode-only)
 
 1. Put the Gateway and its one Workload on a private link. Bind `listen` only to the Workload-facing interface. Anyone who can connect to a sidecar listener can act as its Workload. In the Compose demo the upstream site shares the Gateway's backend network and cannot connect to its proxy port.
 2. Mount the Workload credential and configuration into the Gateway. Give the Gateway write access to a separate public trust directory. Mount that directory read-only at the same path in the Workload. Use separate principals and PID/mount namespaces, remove tracing privileges and keep the container engine socket outside the Workload. Protect the host's memory and swap according to the sensitivity of the traffic.
@@ -26,7 +26,7 @@ Keep the Linux supervisor unprivileged. It requires `/usr/bin/bwrap` and permiss
 
 ### Shared Gateway
 
-[![Shared Gateway process diagram. Authenticated Workloads use distinct grant workers. The supervisor owns the sockets and issuer credentials.](assets/diagrams/shared.svg#gh-light-mode-only)](assets/diagrams/shared.svg)[![Shared Gateway process diagram. Authenticated Workloads use distinct grant workers. The supervisor owns the sockets and issuer credentials.](assets/diagrams/shared-dark.svg#gh-dark-mode-only)](assets/diagrams/shared-dark.svg)
+![Shared Gateway process diagram. Authenticated Workloads use distinct grant workers. The supervisor owns the sockets and issuer credentials.](assets/diagrams/shared.svg#gh-light-mode-only)![Shared Gateway process diagram. Authenticated Workloads use distinct grant workers. The supervisor owns the sockets and issuer credentials.](assets/diagrams/shared-dark.svg#gh-dark-mode-only)
 
 Use `shared.listener_cert` and `shared.listener_key` for the HTTPS proxy listener. Configure the same independent Gateway service secret in the Gateway and Broker. The Workload or its private adapter presents a Gateway-audience bearer token on CONNECT. Give the Workload public trust for both the HTTPS proxy listener and the exact-host leaves the proxy will issue.
 
