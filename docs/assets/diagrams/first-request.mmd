@@ -6,7 +6,7 @@ sequenceDiagram
     participant B as Broker
     participant C as Companion
     participant S as Site
-    rect rgb(246,242,249)
+    rect {band-request}
     Note over W,S: Request and approval
     W->>G: CONNECT
     G->>B: Bind job and host
@@ -17,7 +17,7 @@ sequenceDiagram
     B->>C: Activate grant
     C-->>B: Ready
     end
-    rect rgb(242,246,239)
+    rect {band-sign}
     Note over W,S: Upstream handshake, signed on the desktop
     G->>B: Look up grant and acquire leases
     G->>S: Begin upstream TLS
@@ -28,7 +28,7 @@ sequenceDiagram
     C-->>B: Native signature
     B-->>G: Verified signature
     end
-    rect rgb(246,242,249)
+    rect {band-request}
     Note over W,S: Application traffic
     G->>S: Finish mTLS and send HTTP request
     S-->>G: HTTP response

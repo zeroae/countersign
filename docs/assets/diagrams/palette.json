@@ -8,7 +8,7 @@
     "zone-stroke":   {"light": "#cbbfd3", "dark": "#514660"},
     "desk-fill":     {"light": "#f6faf5", "dark": "#1f2922"},
     "desk-stroke":   {"light": "#a8bfa6", "dark": "#4d6751"},
-    "surface":       {"light": "#fffffe", "dark": "#2b2635"},
+    "surface":       {"light": "#ffffff", "dark": "#2b2635"},
     "actor-fill":    {"light": "#f5eff9", "dark": "#2f2939"},
     "box-stroke":    {"light": "#7c628a", "dark": "#a68bb6"},
     "local-stroke":  {"light": "#69836b", "dark": "#86a889"},

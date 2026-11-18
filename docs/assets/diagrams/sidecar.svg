@@ -6,7 +6,7 @@
     <marker id="control" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="head-control" d="M0 0 8 4 0 8Z"/></marker>
   </defs>
   <style>
-    /* palette:start */ svg{--bg:#ffffff;--text:#251c2b;--muted:#403748;--zone-fill:#fbf9fd;--zone-stroke:#cbbfd3;--desk-fill:#f6faf5;--desk-stroke:#a8bfa6;--surface:#fffffe;--actor-fill:#f5eff9;--box-stroke:#7c628a;--local-stroke:#69836b;--traffic:#3d174f;--control:#315638;--note-text:#213c14;--band-request:#f6f2f9;--band-sign:#f2f6ef;--font:DejaVu Sans, Verdana, sans-serif} /* palette:end */
+    /* palette:start */ svg{--bg:#ffffff;--text:#251c2b;--muted:#403748;--zone-fill:#fbf9fd;--zone-stroke:#cbbfd3;--desk-fill:#f6faf5;--desk-stroke:#a8bfa6;--surface:#ffffff;--actor-fill:#f5eff9;--box-stroke:#7c628a;--local-stroke:#69836b;--traffic:#3d174f;--control:#315638;--note-text:#213c14;--band-request:#f6f2f9;--band-sign:#f2f6ef;--font:DejaVu Sans, Verdana, sans-serif} /* palette:end */
     text {font-family:var(--font);fill:var(--text)}
     .bg {fill:var(--bg)}
     .zone {fill:var(--zone-fill);stroke:var(--zone-stroke)}
