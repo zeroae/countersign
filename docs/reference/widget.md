@@ -1,6 +1,6 @@
 # Web widget and Companion branding
 
-The `@countersign/widget` workspace package registers `<countersign-widget>`. In a pnpm workspace containing the package, use `"@countersign/widget": "workspace:*"` and bundle it into the authenticated page for a Context. For a standalone site, the demo shows how to serve the three ES modules from your own origin. [Widget implementation](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/packages/widget/src/widget.js) · [Demo page](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/site/app.js)
+The `@zeroae/countersign-widget` package registers `<countersign-widget>`. Once the first release is on npm, install it with `npm install @zeroae/countersign-widget` and bundle it into the authenticated page for a Context. From the source workspace, depend on `"@zeroae/countersign-widget": "workspace:*"`. For a standalone site, the demo shows how to serve the three ES modules from your own origin. [Widget implementation](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/packages/widget/src/widget.js) · [Demo page](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/site/app.js)
 
 ## Connect the adapter
 
@@ -12,7 +12,7 @@ The `@countersign/widget` workspace package registers `<countersign-widget>`. In
 The following page module uses the example Integrator's session contract. `/api/session` returns the signed-in user's CSRF token and optional public VAPID key. The `/api/*` routes belong to your application. Their handlers check the session, Origin, CSRF token and Context before calling the [Broker API](api.md).
 
 ```js
-import { subscribeForPush } from "@countersign/widget";
+import { subscribeForPush } from "@zeroae/countersign-widget";
 
 const widget = document.querySelector("countersign-widget");
 const response = await fetch("/api/session", { credentials: "same-origin" });
@@ -74,7 +74,7 @@ To enable the fallback, configure the Broker's `web_push` section with its priva
 Bundle this worker module as `/sw.js`. Its click handler opens a fixed HTTPS page on the Integrator origin with the ID in its fragment.
 
 ```js
-import { installPushHandlers } from "@countersign/widget/service-worker";
+import { installPushHandlers } from "@zeroae/countersign-widget/service-worker";
 installPushHandlers(self, "/");
 ```
 

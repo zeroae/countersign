@@ -36,3 +36,7 @@ python3 -m venv .venv
 ```
 
 Open the local address printed by MkDocs. For native builds, installers, and the local conda package, see [Develop and release](docs/develop.md).
+
+## License
+
+[MIT](LICENSE), copyright 2026 Zero A.E., LLC.

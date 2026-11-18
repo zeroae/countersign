@@ -3,10 +3,13 @@ name = "countersign-broker"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Self-hosted approval and lease broker for Countersign"
 
 [dependencies]
-countersign-pki = { path = "../countersign-pki" }
-countersign-protocol = { path = "../countersign-protocol" }
+countersign-pki.workspace = true
+countersign-protocol.workspace = true
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

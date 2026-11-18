@@ -1,6 +1,6 @@
 FROM rust:1.99-bookworm AS build
 WORKDIR /build
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock LICENSE ./
 COPY crates ./crates
 RUN cargo build --locked --release -p countersign-broker -p countersign-gateway
 

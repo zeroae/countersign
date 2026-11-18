@@ -1,7 +1,6 @@
 {
-  "name": "@countersign/widget",
+  "name": "@zeroae/countersign-widget",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "exports": {
     ".": "./src/widget.js",
@@ -13,5 +12,18 @@
   },
   "devDependencies": {
     "happy-dom": "^21.0.4"
+  },
+  "description": "Web component and service worker helpers for Countersign pairing and approvals",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeroae/countersign.git",
+    "directory": "packages/widget"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
