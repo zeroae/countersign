@@ -17,6 +17,24 @@ import pkcs11
 from pkcs11.util.ec import encode_named_curve_parameters
 
 
+def start_demo_keyring(state):
+    """Start the login keyring on the demo's private D-Bus session."""
+    runtime = state / 'runtime'
+    runtime.mkdir(mode=0o700)
+    env = dict(XDG_DATA_HOME=str(state / 'data'), XDG_CONFIG_HOME=str(state / 'config'),
+               XDG_RUNTIME_DIR=str(runtime), GNOME_KEYRING_CONTROL=str(runtime / 'keyring'))
+    os.environ.update(env)
+    # Unlock and start the same daemon before secret-tool can activate another
+    # one through the session bus, which inherited the user's desktop paths.
+    subprocess.run(['gnome-keyring-daemon', '--unlock', '--components=secrets'],
+                   input=secrets.token_hex(32).encode(), stdout=subprocess.DEVNULL,
+                   check=True, timeout=10)
+    subprocess.run(['gnome-keyring-daemon', '--start', '--components=secrets'],
+                   stdout=subprocess.DEVNULL, check=True, timeout=10)
+    subprocess.run(['gdbus', 'wait', '--session', '--timeout=10', 'org.freedesktop.secrets'],
+                   check=True, timeout=12)
+
+
 def issue(issuer, subject, public_key, *, ca=False, names=()):
     now = dt.datetime.now(dt.timezone.utc)
     key, parent = issuer

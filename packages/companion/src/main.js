@@ -203,6 +203,7 @@ function installHandlers() {
 
 function newWindow() {
   win = new BrowserWindow({width:660,height:760,minWidth:400,minHeight:400,show:false,
+    icon:path('../assets/icon.png'),
     backgroundColor:'#f7f8f6',webPreferences:{preload:path('preload.cjs'),sandbox:true,contextIsolation:true,
       nodeIntegration:false,webSecurity:true,webviewTag:false}});
   win.webContents.setWindowOpenHandler(() => ({action:'deny'}));
@@ -226,7 +227,11 @@ if (!app.requestSingleInstanceLock()) {
     await store.load();
     installHandlers();
     await newWindow();
-    tray = new Tray(nativeImage.createFromPath(path('../assets/tray.png')).resize({width:20,height:20}));
+    // The macOS template picks up the menu bar's current color and Retina scale.
+    const trayIcon = process.platform === 'darwin'
+      ? nativeImage.createFromPath(path('../assets/trayTemplate.png'))
+      : nativeImage.createFromPath(path('../assets/tray.png')).resize({width:20,height:20});
+    tray = new Tray(trayIcon);
     tray.setToolTip('Countersign');
     tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Countersign',click:show},
       {type:'separator'},{label:'Quit',click:() => app.quit()}]));
