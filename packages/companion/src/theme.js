@@ -25,6 +25,13 @@ function color(input) {
   return input.toLowerCase();
 }
 
+// An optional pair for dark appearance. Without it the Companion derives the
+// dark palette from the light colours.
+function darkColors(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected dark theme colors.');
+  return { accent: color(input.accent), background: color(input.background) };
+}
+
 // Accept PNG only. Check dimensions before the desktop decoder allocates, then
 // re-encode the decoded image so that only local raster bytes reach the UI.
 async function logoData(origin, locator, fetcher, decodeLogo) {
@@ -53,6 +60,9 @@ export async function readTheme(origin, fetcher, decodeLogo) {
     copy: displayText(manifest.copy ?? '', 240),
     accent: color(manifest.colors?.accent ?? '#164e63'),
     background: color(manifest.colors?.background ?? '#ffffff'),
+    // Present only when the manifest sets it, so the digests of manifests
+    // without dark colours stay as they were.
+    ...(manifest.colors?.dark === undefined ? {} : { dark: darkColors(manifest.colors.dark) }),
     logo: manifest.logo === undefined ? null :
       await logoData(origin, displayText(manifest.logo, 1024), fetcher, decodeLogo),
   };
@@ -60,9 +70,21 @@ export async function readTheme(origin, fetcher, decodeLogo) {
   return { digest, ...theme };
 }
 
+// A download that matches the accepted theme clears any review. One the
+// person chose to keep their current branding over is not offered again;
+// a further change is.
 export function refreshTheme(pairing, downloaded) {
   if (pairing.theme?.digest === downloaded.digest) {
-    return { ...pairing, pendingTheme: null };
+    return { ...pairing, pendingTheme: null, declinedTheme: null };
   }
-  return { ...pairing, pendingTheme: downloaded };
+  if (pairing.declinedTheme === downloaded.digest) return { ...pairing, pendingTheme: null };
+  return { ...pairing, pendingTheme: downloaded, declinedTheme: null };
+}
+
+// Accept or keep: settle a pending review only if it is still the one shown.
+export function reviewTheme(pairing, digest, accept) {
+  if (!pairing?.pendingTheme || pairing.pendingTheme.digest !== digest) throw new Error('Branding changed.');
+  return accept
+    ? { ...pairing, theme: pairing.pendingTheme, pendingTheme: null, declinedTheme: null }
+    : { ...pairing, pendingTheme: null, declinedTheme: digest };
 }

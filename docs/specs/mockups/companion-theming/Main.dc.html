@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Countersign Companion prototype</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;600&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3d1466}a:hover{color:#2b0548}
+.proto{width:1200px;height:1180px;box-sizing:border-box;padding:36px 40px;display:flex;gap:40px;align-items:flex-start;background:#e7e4ec;font-family:Inter,system-ui,sans-serif;color:#1b1424}
+.pc{width:400px;flex:none;display:flex;flex-direction:column;gap:13px}
+.pc-title{margin:0;font:300 24px/1.2 Figtree,Inter,sans-serif;color:#1b1424}
+.pc-note{margin:0;font-size:12.5px;line-height:1.45;color:#4a4256}
+.pc-why{margin:0;font-size:12.5px;line-height:1.45;color:#2a2233;background:#fff;border:1px solid #c9c1d3;border-radius:8px;padding:8px 10px}
+.pc-group{display:flex;flex-direction:column;gap:5px}
+.pc-label{font:600 11.5px Inter,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#4a4256}
+.pc-opts{display:flex;flex-wrap:wrap;gap:6px}
+.pc-opt{min-height:32px;padding:0 10px;border:1px solid #b3abbe;background:#fff;border-radius:6px;font:500 12.5px Inter,sans-serif;color:#2a2233;cursor:pointer}
+.pc-opt.on{background:#2a2233;color:#fff;border-color:#2a2233}
+.pc-pal{background:#fff;border:1px solid #c9c1d3;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.pc-src{margin:0;font-size:12px;line-height:1.4;color:#4a4256}
+.pc-src strong{color:#1b1424}
+.sw-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.sw{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sw-chip{height:22px;border-radius:5px;border:1px solid rgba(0,0,0,.18)}
+.sw-name{font:600 10.5px Inter,sans-serif;color:#2a2233}
+.sw-hex{font:10.5px "JetBrains Mono",monospace;color:#4a4256}
+.cr{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:2px 10px;font-size:12px;align-items:center}
+.cr-ratio{font:600 12px "JetBrains Mono",monospace}
+.cr-ok{font:600 11px Inter,sans-serif;color:#1f6a12}
+.cr-bad{font:600 11px Inter,sans-serif;color:#a12a1c}
+.ck{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px;font-size:12px;color:#2a2233}
+.ck li{display:flex;gap:6px;align-items:baseline}
+.ck-on{font:600 11px Inter,sans-serif;color:#1f6a12;min-width:44px}
+.ck-off{font:600 11px Inter,sans-serif;color:#a12a1c;min-width:44px}
+.tag-new{display:inline-block;font:600 10.5px/1.4 Inter,sans-serif;color:#6b2c00;background:#fff3e6;border:1px dashed #b45309;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+
+.app{height:760px;flex:none;display:flex;flex-direction:column;background:var(--ground);color:var(--ink);border-radius:10px;overflow:hidden;box-shadow:0 14px 40px rgba(30,15,45,.28),0 0 0 1px rgba(30,15,45,.2);position:relative;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.45;transition:background-color .25s}
+.app :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.app a{color:var(--accent)}
+.band{background:var(--band);color:var(--band-ink);padding:12px 20px 0;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:4px 16px;flex:none;transition:background-color .25s}
+.brandrow{display:flex;align-items:center;gap:10px;padding-bottom:12px;min-height:30px;flex-wrap:wrap}
+.mark{width:26px;height:26px;fill:var(--band-ink);flex:none}
+.wordmark{font:300 21px/1 Figtree,Inter,sans-serif;padding-left:10px;border-left:1px solid var(--band-muted)}
+.brandrow.compact .mark{width:18px;height:18px}
+.brandrow.compact .wordmark{font-size:15px;padding-left:7px}
+.origin-chip{display:inline-flex;align-items:center;gap:6px;margin-left:6px;padding:3px 9px;border:1px solid var(--band-muted);border-radius:999px;font:500 12.5px "JetBrains Mono",ui-monospace,monospace;color:var(--band-ink)}
+.origin-chip .ico{width:15px;height:15px}
+.int-name{font:600 19px/1 Figtree,Inter,sans-serif;color:var(--band-ink)}
+.int-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.int-copy{font-size:12.5px;color:var(--band-muted)}
+.verified-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;background:#ffffff;color:#1b1424;border:1px solid #1b1424;font:500 12px "JetBrains Mono",ui-monospace,monospace;white-space:nowrap}
+.verified-chip .ico{width:14px;height:14px;color:#1f6a12}
+.verified-chip b{font:600 11px Inter,sans-serif;color:#1f6a12}
+.footer{flex:none;display:flex;justify-content:flex-end;align-items:center;padding:6px 10px;background:var(--ground);border-top:1px solid var(--line)}
+.plate{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:6px;background:#ffffff;border:1px solid #1b1424;color:#1b1424;font:500 11.5px Inter,sans-serif;line-height:1}
+.plate svg{width:16px;height:16px;fill:#1b1424}
+.plate .pw{color:#4a4256}
+.plate .wm{font:400 14px/1 Figtree,Inter,sans-serif;padding-left:7px;border-left:1px solid #1b1424}
+.switch-banner{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:var(--note-bg);color:var(--note-ink);font:500 13.5px Inter,sans-serif}
+.switch-banner .ico{width:18px;height:18px}
+.alert{display:flex;gap:10px;border-radius:8px;padding:10px 12px;font-size:13px;border:2px solid}
+.alert .ico{width:22px;height:22px;flex:none}
+.alert p{margin:0}
+.alert strong{display:block;margin-bottom:2px}
+.alert.danger{background:var(--danger-bg);border-color:var(--danger);color:var(--danger-ink)}
+.alert.danger .ico{color:var(--danger)}
+.alert.warning{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
+.alert.warning .ico{color:var(--warn-line)}
+.fixedtext .cert-meta,.fixedtext .fp,.fixedtext .consequence,.fixedtext .expires-label,.fixedtext .expires-day{color:var(--ink)}
+.actions.fixed .btn{width:132px;padding:0}
+.actions.fixed .btn:not(.primary){border:1.5px solid var(--ink);color:var(--ink);background:var(--surface)}
+.int-logo{width:28px;height:28px;flex:none}
+.tabs{display:flex;gap:2px}
+.tab{min-height:44px;padding:0 14px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--band-muted);font:500 14px Inter,sans-serif;cursor:pointer;display:flex;align-items:center;gap:8px}
+.tab.on{color:var(--band-ink);border-bottom-color:var(--underline)}
+.badge{min-width:20px;height:20px;box-sizing:border-box;border-radius:10px;background:var(--underline);color:var(--band);font:600 12px Inter,sans-serif;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+.content{flex:1;overflow-y:auto;position:relative;display:flex;flex-direction:column}
+.pad{padding:18px 24px 24px;flex:1}
+.queue{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;font-size:12.5px;color:var(--muted)}
+.queue strong{color:var(--ink)}
+.eyebrow{margin:0 0 4px;font:600 12px Inter,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.h1{margin:0 0 16px;font:300 26px/1.2 Figtree,Inter,sans-serif;color:var(--ink)}
+.flash{margin:0 0 14px;padding:10px 12px;border-radius:8px;background:var(--accent-soft);color:var(--ink);font-size:13px}
+
+.verified{background:var(--chk-surface);color:var(--chk-ink);border:1px solid var(--chk-line);border-radius:10px;padding:14px 16px 16px}
+.verified-head{display:flex;align-items:center;gap:8px;font:600 12.5px Inter,sans-serif;color:var(--chk-head);margin:0 0 10px}
+.ico{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.facts{margin:0;display:flex;flex-direction:column;gap:8px}
+.fact{display:grid;grid-template-columns:128px minmax(0,1fr);gap:12px;align-items:baseline}
+.fact dt{color:var(--chk-muted);font-size:13px}
+.fact dd{margin:0;overflow-wrap:anywhere;color:var(--chk-ink)}
+.fact-origin dd{font-size:17px;font-weight:600}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13.5px}
+.fact-origin dd.mono{font-size:16px}
+.fact.is-wide dd{color:var(--warn-ink);font-weight:600}
+.warn{margin:12px 0 0;background:var(--warn-bg);border:2px solid var(--warn-line);border-radius:8px;padding:10px 12px;color:var(--warn-ink);display:flex;gap:10px;font-size:13px}
+.warn .ico{width:22px;height:22px;color:var(--warn-line)}
+.warn p{margin:0}
+.warn strong{display:block;margin-bottom:2px}
+
+.brandwrap{margin-top:14px}
+.caption{margin:0 0 6px;font-size:12px;color:var(--muted)}
+.brandbox{display:flex;align-items:center;gap:12px;border:1px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:10px 12px;color:var(--ink)}
+.brandbox svg{width:34px;height:34px;flex:none}
+.brandbox strong{display:block;font-size:14px}
+.brandbox span{display:block;font-size:13px;color:var(--muted)}
+.brandbox.raw{color:#1b1424}
+.brandbox.raw span{color:#3d3547}
+.nobrand{margin-top:14px;font-size:12.5px;color:var(--muted)}
+
+.certs{border:0;margin:0;padding:0;min-width:0;display:flex;flex-direction:column;gap:8px}
+.legend{padding:0;margin:22px 0 8px;font:600 14px Inter,sans-serif;color:var(--ink)}
+.note{margin:0 0 2px;font-size:13px;color:var(--muted)}
+.cert{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer}
+.cert.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cert input{margin:3px 0 0;width:18px;height:18px;accent-color:var(--accent);flex:none}
+.idc{display:grid;grid-template-columns:repeat(5,7px);grid-auto-rows:7px;gap:1px;padding:3px;background:var(--raised);border:1px solid var(--line);border-radius:5px;flex:none}
+.cert-body{min-width:0;flex:1}
+.cert-name{font-weight:600}
+.cert-meta{display:block;font-size:13px;color:var(--muted)}
+.fp{margin-top:6px;font:12px/1.65 "JetBrains Mono",ui-monospace,monospace;color:var(--muted);display:flex;flex-wrap:wrap;gap:0 6px}
+.fp-label{font:600 11.5px/1.9 Inter,sans-serif;margin-right:2px}
+.fp-g.hot{background:var(--hot-bg);color:var(--hot-ink);font-weight:600;border-radius:3px;padding:0 2px}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:14px 16px}
+.empty strong{display:block;margin-bottom:4px}
+.empty p{margin:0 0 6px;color:var(--muted);font-size:13px}
+
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg-btn{min-height:44px;min-width:72px;padding:0 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;font:500 14px Inter,sans-serif;cursor:pointer}
+.seg-btn.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent)}
+.seg-btn:disabled{cursor:not-allowed;color:var(--muted);border-style:dashed}
+.custom{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.custom label{display:flex;align-items:center;gap:8px;font-size:13px}
+.custom input{width:90px;min-height:40px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:14px Inter,sans-serif}
+.hint{font-size:12.5px;color:var(--muted)}
+.expires{margin-top:12px;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.expires-label{font-size:13px;color:var(--muted)}
+.expires-time{font:300 28px/1 Figtree,Inter,sans-serif;color:var(--ink)}
+.expires-day{font-size:13px;color:var(--muted)}
+.small-note{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.consequence{margin:16px 0 0;font-size:13px;color:var(--muted)}
+
+.actions{position:sticky;bottom:0;background:var(--ground);border-top:1px solid var(--line);padding:12px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+.reason{flex:1;min-width:160px;margin:0;font-size:13px;color:var(--muted)}
+.btn{min-height:44px;padding:0 18px;border-radius:8px;font:600 14px Inter,sans-serif;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.btn.primary{background:var(--primary);color:var(--on-primary);border-color:transparent}
+.btn.primary:disabled{opacity:.42;cursor:not-allowed}
+.btn.danger{background:var(--danger);color:var(--on-danger);border-color:transparent}
+.btn.small{min-height:36px;padding:0 12px;font-size:13px}
+.btn.link{border-color:transparent;background:transparent;color:var(--accent);padding:0 6px}
+.actions.loose .btn{border-radius:999px;min-height:48px;padding:0 26px}
+.actions.loose .btn.primary{order:-1}
+
+.result{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.result p{margin:0 0 10px}
+.code{margin:6px 0 4px;font:600 36px/1.1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.06em;color:var(--ink)}
+.code-box{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.card-head{display:flex;gap:12px;align-items:center}
+.card-title{min-width:0;flex:1}
+.card-title strong{display:block;font-size:15px;overflow-wrap:anywhere}
+.card-title span{font-size:13px;color:var(--muted)}
+.swatch{width:34px;height:34px;border-radius:8px;border:1px solid rgba(0,0,0,.15);flex:none}
+.status{font:600 12.5px Inter,sans-serif;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:4px;background:var(--ok)}
+.dot.off{background:var(--muted)}
+.sub{font:600 11.5px Inter,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:16px 0 4px}
+.row{display:flex;justify-content:space-between;gap:6px 12px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
+.row-main{min-width:0;flex:1 1 220px}
+.row-main strong{display:block;overflow-wrap:anywhere}
+.row-main span{display:block;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.int-row{width:100%;text-align:left;display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;color:var(--ink);font:inherit}
+.int-row .chev{color:var(--muted);font-size:18px}
+.st-ok{color:var(--ok)}
+.st-warn{color:var(--warn-ink)}
+.st-muted{color:var(--muted)}
+.notice{display:flex;gap:10px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13px}
+.notice .ico{color:var(--warn-line);width:20px;height:20px}
+.notice p{margin:0}
+.notice strong{display:block}
+.review{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:6px}
+.review .caption{margin-bottom:4px}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:13px;flex:1 1 220px}
+.form input{min-height:44px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:14px Inter,sans-serif}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+.check input{width:20px;height:20px;margin:1px 0 0;accent-color:var(--accent)}
+.check span span{display:block;font-size:13px;color:var(--muted)}
+.idle{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;padding:40px 32px;color:var(--muted)}
+.idle .ico{width:40px;height:40px;color:var(--line);stroke-width:1.5}
+.idle h1{margin:6px 0 0;font:300 24px Figtree,Inter,sans-serif;color:var(--ink)}
+.idle p{margin:0;max-width:360px}
+
+.scrim{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5}
+.dialog{background:var(--surface);color:var(--ink);border-radius:12px;max-width:420px;width:100%;box-sizing:border-box;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.dialog h2{margin:0 0 8px;font:600 17px Inter,sans-serif}
+.dialog p{margin:0 0 16px;color:var(--muted);font-size:14px}
+.dialog .btnrow{justify-content:flex-end;margin-top:0}
+
+.w400 .band{padding:12px 16px 0}
+.w400 .tab{padding:0 10px}
+.w400 .pad{padding:16px}
+.w400 .h1{font-size:22px}
+.w400 .fact{grid-template-columns:minmax(0,1fr);gap:0}
+.w400 .actions{padding:12px 16px}
+.w400 .actions .btn{flex:1}
+.w400 .reason{flex-basis:100%}
+.w400 .review{grid-template-columns:minmax(0,1fr)}
+.w400 .code{font-size:30px}
+.w400 .origin-chip{margin-left:0}
+.w400 .actions.fixed .btn{width:auto;flex:1}
+.w400 .int-name{font-size:17px}
+</style>
+</helmet>
+<div class="proto">
+  <aside class="pc" aria-label="Prototype controls">
+    <h1 class="pc-title">Companion redesign</h1>
+    <p class="pc-note">Prototype controls. The window is the Companion at 660 × 760. The whole app takes the colours of the Integrator whose request, pairing or detail is on screen; everything else uses the Countersign purple theme. Dashed orange tags mark data the Companion does not receive today.</p>
+    <sc-for list="{{controls}}" as="g" hint-placeholder-count="7">
+      <div class="pc-group" role="group" aria-label="{{g.label}}">
+        <span class="pc-label">{{g.label}}</span>
+        <div class="pc-opts">
+          <sc-for list="{{g.options}}" as="o" hint-placeholder-count="3">
+            <button type="button" class="pc-opt {{o.cls}}" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+    <p class="pc-why"><strong>Why guardrails:</strong> a theme alone should never make one Integrator look like another, or like Countersign's own approval screen.</p>
+    <div class="pc-pal" aria-label="Fixed in every theme">
+      <span class="pc-label">Fixed in every theme · {{modeName}}</span>
+      <ul class="ck">
+        <sc-for list="{{fixedList}}" as="fx" hint-placeholder-count="7">
+          <li><span class="{{fx.cls}}">{{fx.state}}</span><span>{{fx.text}}</span></li>
+        </sc-for>
+      </ul>
+    </div>
+    <div class="pc-pal" aria-label="Active palette">
+      <span class="pc-label">Active palette · {{modeLabel}}</span>
+      <p class="pc-src"><strong>{{palSource}}</strong><br>{{palDetail}}</p>
+      <div class="sw-grid">
+        <sc-for list="{{swatches}}" as="sw" hint-placeholder-count="10">
+          <div class="sw"><span class="sw-chip" style="background: {{sw.hex}}"></span><span class="sw-name">{{sw.name}}</span><span class="sw-hex">{{sw.hex}}</span></div>
+        </sc-for>
+      </div>
+      <div class="cr">
+        <sc-for list="{{checks}}" as="ck" hint-placeholder-count="5">
+          <span>{{ck.name}}</span><span class="cr-ratio">{{ck.ratio}}</span><span class="{{ck.cls}}">{{ck.verdict}}</span>
+        </sc-for>
+      </div>
+    </div>
+    <div class="pc-opts"><button type="button" class="pc-opt" onClick="{{reset}}">Reset decisions</button></div>
+  </aside>
+
+  <div class="app {{widthClass}} {{fixedTextCls}}" style="width: {{frameW}}px; {{themeVars}}">
+    <header class="band">
+      <sc-if value="{{hdrCountersign}}" hint-placeholder-val="{{ true }}">
+        <div class="brandrow {{hdrCompact}}">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="8" width="18" height="6"></rect><rect x="11" y="18" width="18" height="6"></rect></svg>
+          <span class="wordmark">countersign</span>
+          <sc-if value="{{hdrOrigin}}" hint-placeholder-val="{{ false }}">
+            <span class="origin-chip" aria-label="Verified origin {{activeHost}}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z"></path><path d="M8.5 12l2.5 2.5 4.5-5"></path></svg>{{activeHost}}</span>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{hdrIntegrator}}" hint-placeholder-val="{{ false }}">
+        <div class="brandrow">
+          <sc-if value="{{activeLogo}}" hint-placeholder-val="{{ true }}"><svg class="int-logo" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="2"></rect><path d="M6 20c3.5-3 6.5-3 10 0s6.5 3 10 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path><path d="M9 13h16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg></sc-if>
+          <span class="int-text"><span class="int-name">{{activeName}}</span><sc-if value="{{activeHasCopy}}" hint-placeholder-val="{{ true }}"><span class="int-copy">{{activeCopy}}</span></sc-if></span>
+          <sc-if value="{{hdrVerified}}" hint-placeholder-val="{{ true }}">
+            <span class="verified-chip" aria-label="Verified origin {{activeHost}}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>{{activeHost}} <b>verified</b></span>
+          </sc-if>
+        </div>
+      </sc-if>
+      <nav class="tabs" aria-label="Sections">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+          <button type="button" class="tab {{t.cls}}" aria-current="{{t.current}}" onClick="{{t.pick}}">{{t.label}}<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span class="badge" aria-label="{{t.badgeLabel}}">{{t.badge}}</span></sc-if></button>
+        </sc-for>
+      </nav>
+    </header>
+
+    <main class="content">
+      <sc-if value="{{showApproval}}" hint-placeholder-val="{{ true }}">
+        <div class="pad">
+          <sc-if value="{{showBanner}}" hint-placeholder-val="{{ false }}">
+            <p class="switch-banner" role="status"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14"></path><path d="M13 6l6 6-6 6"></path></svg>{{banner}}</p>
+          </sc-if>
+          <div class="queue" role="status"><span><strong>Request {{qPos}} of {{qTotal}}</strong> · oldest first</span><span>{{qWaiting}}</span></div>
+          <sc-if value="{{undecided}}" hint-placeholder-val="{{ true }}">
+            <p class="eyebrow">Approval request</p>
+            <h1 class="h1">Let this job use a client certificate?</h1>
+
+            <section class="verified" aria-labelledby="verified-title">
+              <p class="verified-head" id="verified-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z"></path><path d="M8.5 12l2.5 2.5 4.5-5"></path></svg>Checked by Countersign</p>
+              <dl class="facts">
+                <div class="fact fact-origin"><dt>Integrator</dt><dd class="mono">{{offer.origin}}</dd></div>
+                <div class="fact"><dt>Account</dt><dd>{{offer.user}}</dd></div>
+                <div class="fact"><dt>Context</dt><dd>{{offer.context}}</dd></div>
+                <div class="fact"><dt>Requested host</dt><dd class="mono">{{offer.host}}</dd></div>
+                <div class="fact {{scopeCls}}"><dt>Approval covers</dt><dd class="mono">{{offer.scope}}</dd></div>
+              </dl>
+              <sc-if value="{{wide}}" hint-placeholder-val="{{ false }}">
+                <div class="warn" role="note">
+                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4.5"></path><path d="M12 17.5v.5"></path></svg>
+                  <p><strong>This approval covers more than the requested host.</strong>Any host matching {{offer.scope}}, such as archive.team.example:9444, can use the certificate until access ends. Deny if you only meant {{offer.host}}.</p>
+                </div>
+              </sc-if>
+            </section>
+
+            <sc-if value="{{showBrandBox}}" hint-placeholder-val="{{ true }}">
+              <div class="brandwrap">
+                <p class="caption">Provided by {{originHost}}. Name, text and colours are not checked.</p>
+                <div class="brandbox">
+                  <sc-if value="{{brand.logo}}" hint-placeholder-val="{{ true }}">
+                    <svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="7" fill="{{brand.logoFill}}"></rect><path d="M6 20c3.5-3 6.5-3 10 0s6.5 3 10 0" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"></path><path d="M9 13h16" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"></path></svg>
+                  </sc-if>
+                  <div><strong>{{brand.name}}</strong><sc-if value="{{brand.hasCopy}}" hint-placeholder-val="{{ true }}"><span>{{brand.copy}}</span></sc-if></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{noBrand}}" hint-placeholder-val="{{ false }}">
+              <p class="nobrand">This Integrator has not provided branding, so Countersign's own theme is shown.</p>
+            </sc-if>
+
+            <fieldset class="certs">
+              <legend class="legend">Certificate</legend>
+              <sc-if value="{{dup}}" hint-placeholder-val="{{ true }}">
+                <p class="note">{{dupCount}} certificates are named {{dupName}}. Compare the highlighted part of each fingerprint and the pattern beside it.</p>
+              </sc-if>
+              <sc-for list="{{certs}}" as="c" hint-placeholder-count="2">
+                <label class="cert {{c.cls}}">
+                  <input type="radio" name="certificate" checked="{{c.checked}}" onChange="{{c.pick}}">
+                  <span class="idc" aria-hidden="true"><sc-for list="{{c.cells}}" as="cell" hint-placeholder-count="25"><span style="background: {{cell.bg}}"></span></sc-for></span>
+                  <span class="cert-body">
+                    <span class="cert-name">{{c.identity}}</span>
+                    <span class="cert-meta">Issued by {{c.issuer}} · valid until {{c.validUntil}}</span>
+                    <span class="fp"><span class="fp-label">SHA-256</span><sc-for list="{{c.groups}}" as="gr" hint-placeholder-count="16"><span class="fp-g {{gr.cls}}">{{gr.text}}</span></sc-for></span>
+                  </span>
+                </label>
+              </sc-for>
+              <sc-if value="{{noneEligible}}" hint-placeholder-val="{{ false }}">
+                <div class="empty">
+                  <strong>No eligible certificate on this computer</strong>
+                  <p>A certificate must allow client authentication, have its private key here, and match the issuers this destination accepts.</p>
+                  <p>Ask the Integrator which certificate it expects, or deny this request.</p>
+                </div>
+              </sc-if>
+              <sc-if value="{{providerDown}}" hint-placeholder-val="{{ false }}">
+                <div class="alert danger" role="alert">
+                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.5v.5"></path></svg>
+                  <p><strong>The certificate provider is unavailable</strong>Unlock or reconnect it, then request access again from the job. On Linux, check that p11-kit sees the token in this login session.</p>
+                </div>
+              </sc-if>
+            </fieldset>
+
+            <sc-if value="{{hasCerts}}" hint-placeholder-val="{{ true }}">
+              <div role="group" aria-labelledby="dur-title">
+                <p class="legend" id="dur-title">How long?</p>
+                <div class="seg">
+                  <sc-for list="{{presets}}" as="p" hint-placeholder-count="4">
+                    <button type="button" class="seg-btn {{p.cls}}" disabled="{{p.disabled}}" aria-pressed="{{p.pressed}}" onClick="{{p.pick}}">{{p.label}}</button>
+                  </sc-for>
+                </div>
+                <sc-if value="{{isCustom}}" hint-placeholder-val="{{ false }}">
+                  <div class="custom">
+                    <label>Minutes <input type="number" min="1" value="{{customValue}}" onChange="{{onCustom}}"></label>
+                    <span class="hint">Up to {{maxLabel}}</span>
+                  </div>
+                </sc-if>
+                <p class="small-note">Your administrator allows up to {{maxLabel}}, so longer presets are unavailable.</p>
+                <div class="expires" aria-live="polite">
+                  <span class="expires-label">Access ends</span>
+                  <span class="expires-time">{{untilTime}}</span>
+                  <span class="expires-day">{{untilDay}}</span>
+                </div>
+                <sc-if value="{{capped}}" hint-placeholder-val="{{ false }}">
+                  <div class="alert warning" role="note" style="margin-top: 10px">
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4.5"></path><path d="M12 17.5v.5"></path></svg>
+                    <p><strong>Shortened to the certificate's expiry</strong>This certificate expires at {{certExpiry}}, so access ends then.</p>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <p class="consequence">Until access ends, the Integrator's Gateway can read and send traffic to {{offer.scope}} using this certificate.</p>
+          </sc-if>
+
+          <sc-if value="{{approved}}" hint-placeholder-val="{{ false }}">
+            <p class="eyebrow">Approved</p>
+            <h1 class="h1">The job can use your certificate</h1>
+            <div class="result">
+              <p>{{originHost}} can use {{selName}} ({{selShort}}) for {{offer.scope}} until {{untilTime}} {{untilDayShort}}.</p>
+              <p class="small-note">Waiting for the Gateway. The approval shows Ready for handshakes once the first handshake is signed.</p>
+            </div>
+          </sc-if>
+          <sc-if value="{{denied}}" hint-placeholder-val="{{ false }}">
+            <p class="eyebrow">Denied</p>
+            <h1 class="h1">Request denied</h1>
+            <div class="result"><p>{{originHost}} can request access again after it changes the request.</p></div>
+          </sc-if>
+          <sc-if value="{{decidedAny}}" hint-placeholder-val="{{ false }}">
+            <div class="btnrow">
+              <sc-if value="{{hasNext}}" hint-placeholder-val="{{ true }}"><button type="button" class="btn primary" onClick="{{nextRequest}}">Next request · {{nextHost}}</button></sc-if>
+              <sc-if value="{{noNext}}" hint-placeholder-val="{{ false }}"><button type="button" class="btn" onClick="{{goIntegrators}}">View Integrators</button></sc-if>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{undecided}}" hint-placeholder-val="{{ true }}">
+          <div class="actions {{actionsCls}}">
+            <p class="reason">{{reason}}</p>
+            <button type="button" class="btn" onClick="{{deny}}">{{denyLabel}}</button>
+            <button type="button" class="btn primary" disabled="{{approveDisabled}}" onClick="{{approve}}">{{approveLabel}}</button>
+          </div>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{showIdle}}" hint-placeholder-val="{{ false }}">
+        <div class="idle">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z"></path></svg>
+          <h1>No pending requests</h1>
+          <p>When a job asks to use one of your certificates, it opens here and Countersign notifies you. Closing this window keeps Countersign running in the tray.</p>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showPairing}}" hint-placeholder-val="{{ false }}">
+        <div class="pad">
+          <p class="eyebrow">Pairing request</p>
+          <h1 class="h1">Confirm this pairing?</h1>
+          <section class="verified" aria-label="Checked by Countersign">
+            <p class="verified-head"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z"></path><path d="M8.5 12l2.5 2.5 4.5-5"></path></svg>Checked by Countersign</p>
+            <dl class="facts">
+              <div class="fact fact-origin"><dt>Integrator</dt><dd class="mono">{{focus.origin}}</dd></div>
+              <div class="fact"><dt>Account</dt><dd>{{focus.user}}</dd></div>
+            </dl>
+          </section>
+          <div class="code-box">
+            <p class="eyebrow">Pairing code</p>
+            <p class="code" aria-label="{{codeSpoken}}">{{codeGrouped}}</p>
+            <p class="small-note">Check that your browser shows the same code for this account, then confirm here. If anything differs, cancel.</p>
+          </div>
+        </div>
+        <div class="actions {{actionsCls}}">
+          <p class="reason">Pairing lets {{focus.host}} send you approval requests. It cannot approve anything by itself.</p>
+          <button type="button" class="btn" onClick="{{cancelPair}}">Cancel pairing</button>
+          <button type="button" class="btn primary" onClick="{{confirmPair}}">Confirm pairing</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showList}}" hint-placeholder-val="{{ false }}">
+        <div class="pad">
+          <sc-if value="{{hasFlash}}" hint-placeholder-val="{{ false }}"><p class="flash" role="status">{{flash}}</p></sc-if>
+          <h1 class="h1">Paired Integrators</h1>
+          <sc-for list="{{pairList}}" as="pl" hint-placeholder-count="3">
+            <button type="button" class="int-row" onClick="{{pl.open}}">
+              <span class="swatch" style="background: {{pl.chip}}"></span>
+              <span class="card-title"><strong class="mono">{{pl.origin}}</strong><span>{{pl.name}} · {{pl.user}} · {{pl.summary}}</span></span>
+              <span class="status {{pl.statusCls}}"><span class="dot {{pl.dotCls}}"></span>{{pl.status}}</span>
+              <span class="chev" aria-hidden="true">›</span>
+            </button>
+          </sc-for>
+          <p class="sub">Pair another Integrator</p>
+          <form class="form" onSubmit="{{startPair}}">
+            <label>Integrator origin <input type="url" placeholder="https://integrator.example" value="{{originInput}}" onChange="{{onOrigin}}"></label>
+            <button type="submit" class="btn">Pair</button>
+          </form>
+          <p class="small-note">Countersign opens the Integrator in your browser. Sign in there and enter the code shown here.</p>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showDetail}}" hint-placeholder-val="{{ false }}">
+        <div class="pad">
+          <div class="btnrow" style="margin: 0 0 12px"><button type="button" class="btn small" onClick="{{backToList}}">‹ All Integrators</button></div>
+          <sc-if value="{{hasFlash}}" hint-placeholder-val="{{ false }}"><p class="flash" role="status">{{flash}}</p></sc-if>
+          <article class="card">
+            <div class="card-head">
+              <span class="swatch" style="background: {{pr.chip}}"></span>
+              <span class="card-title"><strong class="mono">{{pr.origin}}</strong><span>{{pr.name}} · {{pr.user}}</span></span>
+              <span class="status {{pr.statusCls}}"><span class="dot {{pr.dotCls}}"></span>{{pr.status}}</span>
+            </div>
+
+            <sc-for list="{{pr.notices}}" as="n" hint-placeholder-count="1">
+              <div class="notice" role="note">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4.5"></path><path d="M12 17.5v.5"></path></svg>
+                <p><strong>{{n.title}}</strong>{{n.meta}}. Check the device list below.</p>
+              </div>
+            </sc-for>
+
+            <sc-if value="{{pr.reviewing}}" hint-placeholder-val="{{ false }}">
+              <p class="sub">Branding change to review</p>
+              <div class="review">
+                <div>
+                  <p class="caption">Current</p>
+                  <div class="brandbox raw" style="background: {{pr.cur.background}}; border-color: {{pr.cur.accent}}"><div><strong>{{pr.cur.name}}</strong><span>{{pr.cur.copyOrDash}}</span></div></div>
+                </div>
+                <div>
+                  <p class="caption">Proposed by {{pr.host}}</p>
+                  <div class="brandbox raw" style="background: {{pr.next.background}}; border-color: {{pr.next.accent}}"><div><strong>{{pr.next.name}}</strong><span>{{pr.next.copyOrDash}}</span></div></div>
+                </div>
+              </div>
+              <p class="small-note">Accepting also changes the colours this whole window takes on for {{pr.host}}.</p>
+              <div class="btnrow">
+                <button type="button" class="btn small" onClick="{{pr.acceptTheme}}">Accept new branding</button>
+                <button type="button" class="btn small" onClick="{{pr.keepTheme}}">Keep current</button><span class="tag-new">needs new IPC</span>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{pr.hasApprovals}}" hint-placeholder-val="{{ true }}">
+              <p class="sub">Approvals</p>
+              <sc-for list="{{pr.approvals}}" as="ap" hint-placeholder-count="3">
+                <div class="row">
+                  <div class="row-main">
+                    <strong class="mono">{{ap.host}}</strong>
+                    <span>{{ap.context}} · covers {{ap.scope}} · SHA-256 {{ap.short}}</span>
+                    <span class="{{ap.statusCls}}">{{ap.status}} · ends {{ap.until}}</span>
+                  </div>
+                  <sc-if value="{{ap.hasAction}}" hint-placeholder-val="{{ true }}">
+                    <button type="button" class="btn small" onClick="{{ap.act}}">{{ap.actLabel}}</button>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </sc-if>
+
+            <sc-if value="{{pr.hasDevices}}" hint-placeholder-val="{{ true }}">
+              <p class="sub">Companions on this account</p>
+              <sc-for list="{{pr.devices}}" as="d" hint-placeholder-count="2">
+                <div class="row">
+                  <div class="row-main">
+                    <strong class="mono">{{d.pairing}}<sc-if value="{{d.isThis}}" hint-placeholder-val="{{ false }}"><span class="tag-new">This computer · needs new field</span></sc-if></strong>
+                    <span>{{d.state}} · {{d.addr}}</span>
+                  </div>
+                  <sc-if value="{{d.canDisconnect}}" hint-placeholder-val="{{ true }}">
+                    <button type="button" class="btn small" onClick="{{d.disconnect}}">Disconnect device</button>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </sc-if>
+
+            <div class="btnrow">
+              <sc-if value="{{pr.multiDevice}}" hint-placeholder-val="{{ false }}"><button type="button" class="btn small" onClick="{{pr.disconnectAll}}">Disconnect all other devices</button></sc-if>
+              <button type="button" class="btn small" onClick="{{pr.revokeAtIntegrator}}">Revoke pairing at Integrator</button>
+              <button type="button" class="btn small" onClick="{{pr.removeLocal}}">Remove from this computer</button>
+            </div>
+          </article>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showSettings}}" hint-placeholder-val="{{ false }}">
+        <div class="pad">
+          <h1 class="h1">Settings</h1>
+          <div class="card">
+            <label class="check"><input type="checkbox" checked="{{login}}" onChange="{{toggleLogin}}"><span>Start at login<span>Receive requests as soon as you sign in to this computer.</span></span></label>
+          </div>
+          <div class="card">
+            <p style="margin: 0 0 6px; font-weight: 600">Appearance</p>
+            <p class="small-note" style="margin: 0">Follows your system's light or dark setting. While an Integrator's request is open, the window uses that Integrator's colours.</p>
+          </div>
+          <div class="card">
+            <p style="margin: 0 0 6px; font-weight: 600">Closing and quitting</p>
+            <p class="small-note" style="margin: 0">Closing this window keeps Countersign in the tray, receiving requests and signing approved handshakes. Choose Quit in the tray to stop it; new handshakes then wait until you reopen it.</p>
+          </div>
+        </div>
+      </sc-if>
+    </main>
+    <sc-if value="{{showPowered}}" hint-placeholder-val="{{ true }}">
+      <footer class="footer">
+        <span class="plate" aria-label="Countersign"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="8" width="18" height="6"></rect><rect x="11" y="18" width="18" height="6"></rect></svg><span class="wm">countersign</span></span>
+      </footer>
+    </sc-if>
+
+    <sc-if value="{{dialogOpen}}" hint-placeholder-val="{{ false }}">
+      <div class="scrim">
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+          <h2 id="dlg-title">{{dialog.title}}</h2>
+          <p>{{dialog.body}}</p>
+          <div class="btnrow">
+            <button type="button" class="btn" onClick="{{closeDialog}}">Cancel</button>
+            <button type="button" class="btn {{dialog.cls}}" onClick="{{confirmDialog}}">{{dialog.confirm}}</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","light","dark"],"default":"system"},"$preview":{"width":1200,"height":1180}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      screen: 'approval', idx: 0, decisions: {}, focusInt: 'harbor', certs: 'two', guard: 'middle', switching: false, banner: '', width: 660, theme: null, sysDark: false,
+      picked: null, preset: '1h', customValue: '90', dialog: null, flash: '',
+      rev: { a1: null, a2: 'pending', a3: 'recorded' }, review: 'pending', login: true, originInput: '', disconnected: {}
+    };
+  }
+
+  componentDidMount() {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+    this.onScheme = () => this.setState({ sysDark: this.mq.matches });
+    this.onScheme();
+    if (this.mq.addEventListener) this.mq.addEventListener('change', this.onScheme);
+  }
+
+  componentWillUnmount() {
+    clearTimeout(this.t1); clearTimeout(this.t2);
+    if (this.mq && this.mq.removeEventListener) this.mq.removeEventListener('change', this.onScheme);
+  }
+
+  /* ---------- colour math: sRGB <-> OKLCH, WCAG contrast ---------- */
+  rgb(hex) { const h = hex.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255); }
+  lin(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  unlin(c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; }
+  oklch(hex) {
+    const [r, g, b] = this.rgb(hex).map(c => this.lin(c));
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    let h = Math.atan2(B, A) * 180 / Math.PI; if (h < 0) h += 360;
+    return { l: L, c: Math.hypot(A, B), h };
+  }
+  linFromOklch(L, C, H) {
+    const a = C * Math.cos(H * Math.PI / 180), b = C * Math.sin(H * Math.PI / 180);
+    const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+    const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+    const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b, 3);
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+  }
+  inGamut(v) { return v.every(x => x >= -0.0005 && x <= 1.0005); }
+  hex(L, C, H) {
+    L = Math.min(1, Math.max(0, L));
+    let v = this.linFromOklch(L, C, H);
+    if (!this.inGamut(v)) {
+      let lo = 0, hi = C;
+      for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (this.inGamut(this.linFromOklch(L, mid, H))) lo = mid; else hi = mid; }
+      v = this.linFromOklch(L, lo, H);
+    }
+    return '#' + v.map(x => Math.round(Math.min(1, Math.max(0, this.unlin(Math.min(1, Math.max(0, x))))) * 255).toString(16).padStart(2, '0')).join('');
+  }
+  lum(hex) { const [r, g, b] = this.rgb(hex).map(c => this.lin(c)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+  ratio(a, b) { const x = this.lum(a), y = this.lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  /* Move lightness in `dir` until the colour reaches `target` contrast against `against`. */
+  fit(L, C, H, against, target, dir) {
+    let l = L, out = this.hex(l, C, H);
+    for (let i = 0; i < 120 && this.ratio(out, against) < target; i++) { l += dir * 0.01; if (l < 0 || l > 1) break; out = this.hex(l, C, H); }
+    return out;
+  }
+
+  fixed(dark) {
+    return dark
+      ? { 'warn-bg': '#3a2a05', 'warn-line': '#f5b544', 'warn-ink': '#ffe2a8', ok: '#a1ca7c', danger: '#f08a7a', 'on-danger': '#2a0905', 'danger-bg': '#3a1410', 'danger-ink': '#ffd7d0', 'note-bg': '#f2eff5', 'note-ink': '#1b1424', scrim: 'rgba(0,0,0,.6)' }
+      : { 'warn-bg': '#fff1d6', 'warn-line': '#b45309', 'warn-ink': '#4a1f00', ok: '#2f7a12', danger: '#a12a1c', 'on-danger': '#ffffff', 'danger-bg': '#fdecea', 'danger-ink': '#5c130b', 'note-bg': '#1b1424', 'note-ink': '#ffffff', scrim: 'rgba(20,12,30,.45)' };
+  }
+
+  countersign(dark) {
+    return dark
+      ? { band: '#2b0548', 'band-ink': '#ffffff', 'band-muted': '#ddd0ea', underline: '#a1ca7c', ground: '#17131d', surface: '#211b29', raised: '#2a2333', ink: '#f0ebf5', muted: '#b9afc4', line: '#3d3447', accent: '#d2b3ea', 'accent-soft': '#2f2540', primary: '#a1ca7c', 'on-primary': '#11200a', focus: '#8fb8ff', 'hot-bg': '#3b2a4f', 'hot-ink': '#ecdcfa' }
+      : { band: '#2b0548', 'band-ink': '#ffffff', 'band-muted': '#ddd0ea', underline: '#a1ca7c', ground: '#f5f4f7', surface: '#ffffff', raised: '#f3f0f6', ink: '#1b1424', muted: '#554c60', line: '#d9d3e0', accent: '#3d1466', 'accent-soft': '#f1eaf7', primary: '#224805', 'on-primary': '#ffffff', focus: '#2f6fd6', 'hot-bg': '#ece0f6', 'hot-ink': '#2b0548' };
+  }
+
+  /* Full palette from a manifest's accent/background (and optional colors.dark), with AA clamps. */
+  derive(man, dark) {
+    const A = this.oklch(man.accent), H = A.h, C = Math.max(A.c, 0.02);
+    if (!dark) {
+      const Bg = this.oklch(man.background), gh = Bg.c > 0.004 ? Bg.h : H;
+      const ground = this.hex(0.972, Math.min(Math.max(Bg.c, 0.008), 0.018), gh);
+      const surface = '#ffffff';
+      const band = this.fit(Math.min(A.l, 0.42), Math.min(C, 0.14), H, '#ffffff', 7, -1);
+      const hotBg = this.hex(0.92, Math.min(C, 0.06), H);
+      return {
+        band, 'band-ink': '#ffffff', 'band-muted': this.fit(0.88, Math.min(C, 0.05), H, band, 4.5, 1), underline: this.fit(0.82, Math.min(C, 0.13), H, band, 4.5, 1),
+        ground, surface, raised: this.hex(0.95, Math.min(C, 0.02), H), ink: this.hex(0.23, Math.min(C, 0.03), H),
+        muted: this.fit(0.48, Math.min(C, 0.03), H, ground, 4.5, -1), line: this.hex(0.86, Math.min(C, 0.035), H),
+        accent: this.fit(A.l, A.c, H, surface, 4.5, -1), 'accent-soft': this.hex(0.95, Math.min(C, 0.04), H),
+        primary: this.fit(A.l, A.c, H, '#ffffff', 4.5, -1), 'on-primary': '#ffffff',
+        focus: this.fit(0.58, Math.max(C, 0.12), H, ground, 3, -1), 'hot-bg': hotBg, 'hot-ink': this.fit(0.32, C, H, hotBg, 4.5, -1)
+      };
+    }
+    const src = man.dark;
+    const AD = src ? this.oklch(src.accent) : { l: Math.max(A.l, 0.78), c: Math.min(A.c, 0.13), h: H };
+    const BD = src ? this.oklch(src.background) : { l: 0.19, c: Math.min(C, 0.02), h: H };
+    const gl = Math.min(Math.max(BD.l, 0.15), 0.23), gc = Math.min(BD.c, 0.03);
+    const ground = this.hex(gl, gc, BD.h), surface = this.hex(gl + 0.05, gc, BD.h);
+    const band = this.fit(0.34, Math.min(AD.c, 0.10), AD.h, '#ffffff', 7, -1);
+    const onPrimary = this.hex(0.18, Math.min(AD.c, 0.03), AD.h);
+    const hotBg = this.hex(0.32, Math.min(AD.c, 0.07), AD.h);
+    return {
+      band, 'band-ink': '#ffffff', 'band-muted': this.fit(0.88, Math.min(AD.c, 0.05), AD.h, band, 4.5, 1), underline: this.fit(0.82, Math.min(AD.c, 0.13), AD.h, band, 4.5, 1),
+      ground, surface, raised: this.hex(gl + 0.09, gc, BD.h), ink: this.hex(0.95, 0.01, AD.h),
+      muted: this.fit(0.78, Math.min(AD.c, 0.02), AD.h, surface, 4.5, 1), line: this.hex(gl + 0.17, gc, BD.h),
+      accent: this.fit(Math.max(AD.l, 0.7), AD.c, AD.h, surface, 4.5, 1), 'accent-soft': this.hex(gl + 0.08, Math.min(AD.c, 0.05), AD.h),
+      primary: this.fit(Math.max(AD.l, 0.72), AD.c, AD.h, onPrimary, 4.5, 1), 'on-primary': onPrimary,
+      focus: this.fit(0.75, Math.max(AD.c, 0.12), AD.h, ground, 3, 1), 'hot-bg': hotBg, 'hot-ink': this.fit(0.92, Math.min(AD.c, 0.05), AD.h, hotBg, 4.5, 1)
+    };
+  }
+
+  /* ---------- formatting ---------- */
+  now() { return new Date(2026, 10, 17, 18, 39, 41).getTime(); }
+  time(ms) { const d = new Date(ms); let h = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + m + ' ' + ap; }
+  day(ms) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const d = new Date(ms), n = new Date(this.now()), label = months[d.getMonth()] + ' ' + d.getDate();
+    const diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000);
+    if (diff === 0) return { long: 'today, ' + label, short: 'today', bare: label };
+    if (diff === 1) return { long: 'tomorrow, ' + label, short: 'tomorrow', bare: label };
+    return { long: label, short: 'on ' + label, bare: label };
+  }
+  dur(s) { if (s < 3600) return Math.round(s / 60) + ' min'; const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return m ? h + ' h ' + m + ' min' : h + ' h'; }
+  group(hex) { return hex.match(/.{1,4}/g).join(' '); }
+  identicon(fp, dark) {
+    const hue = parseInt(fp.slice(0, 3), 16) % 360;
+    const on = dark ? 'hsl(' + hue + ' 60% 68%)' : 'hsl(' + hue + ' 55% 40%)';
+    const cells = [];
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) { const cc = c < 3 ? c : 4 - c; cells.push({ bg: parseInt(fp[3 + r * 3 + cc], 16) % 2 === 0 ? on : 'transparent' }); }
+    return cells;
+  }
+
+  renderVals() {
+    const s = this.state, NOW = this.now();
+    const themePref = s.theme || this.props.theme || 'system';
+    const dark = themePref === 'dark' || (themePref === 'system' && s.sysDark);
+    const mode = s.guard, strict = mode === 'strict', open = mode === 'open', middle = mode === 'middle';
+
+    const INT = {
+      harbor: { key: 'harbor', origin: 'https://portal.example', user: 'u-42',
+        manifest: { name: 'Harbor Ledger', copy: 'Client reporting workspace', accent: '#0f6b6b', background: '#eef6f4', dark: { accent: '#5cc8bd', background: '#0f1f1e' }, logo: true } },
+      demo: { key: 'demo', origin: 'https://localhost:8443', user: 'demo-user',
+        manifest: s.review === 'accepted'
+          ? { name: 'Demo Integrator', copy: 'Reconciliation sandbox', accent: '#7a3e9d', background: '#f4edf9', dark: null, logo: false }
+          : { name: 'Demo Integrator', copy: '', accent: '#d9822b', background: '#fdf6ee', dark: null, logo: false } },
+      none: { key: 'none', origin: 'https://jobs.example', user: 'u-42', manifest: null }
+    };
+    Object.values(INT).forEach(i => { i.host = i.origin.replace(/^https:\/\//, ''); });
+    const QUEUE = [
+      { int: 'harbor', context: 'close-q3', host: 'ledger.partner.example:443', scope: 'ledger.partner.example:443' },
+      { int: 'demo', context: 'demo-context', host: 'reports.team.example:9444', scope: '*.team.example:9444' },
+      { int: 'none', context: 'nightly-export', host: 'ledger.partner.example:443', scope: 'ledger.partner.example:443' }
+    ];
+
+    /* Which Integrator owns the screen decides the theme. */
+    const q = QUEUE[s.idx];
+    const activeKey = s.screen === 'approval' ? q.int : (s.screen === 'pairing' || s.screen === 'detail') ? s.focusInt : null;
+    const active = activeKey ? INT[activeKey] : null;
+    const man = active ? active.manifest : null;
+    let pal = Object.assign({}, this.fixed(dark), man ? this.derive(man, dark) : this.countersign(dark));
+    if (man && open) {
+      /* Open: raw manifest colour on the button, themed check card, no fixed elements. */
+      const rawAccent = dark ? (man.dark ? man.dark.accent : pal.primary) : man.accent;
+      pal.primary = rawAccent; pal['on-primary'] = dark ? pal['on-primary'] : '#ffffff';
+      Object.assign(pal, { 'chk-surface': pal['accent-soft'], 'chk-line': pal.accent, 'chk-ink': pal.ink, 'chk-muted': pal.muted, 'chk-head': pal.accent });
+    } else if (man && middle) {
+      /* Middle ground: tinted check card, but only clamped palette colours. */
+      Object.assign(pal, { 'chk-surface': pal['accent-soft'], 'chk-line': pal.accent, 'chk-ink': pal.ink, 'chk-muted': pal.muted, 'chk-head': pal.ink });
+    } else {
+      Object.assign(pal, dark
+        ? { 'chk-surface': '#1d1b21', 'chk-line': '#3a3640', 'chk-ink': '#f2eff5', 'chk-muted': '#b9b3c1', 'chk-head': '#f2eff5' }
+        : { 'chk-surface': '#ffffff', 'chk-line': '#cfcad6', 'chk-ink': '#1b1424', 'chk-muted': '#4f4859', 'chk-head': '#1b1424' });
+    }
+    const themeVars = Object.keys(pal).map(k => '--' + k + ': ' + pal[k]).join('; ');
+
+    const swatchKeys = [['band', 'Band'], ['underline', 'Tab line'], ['ground', 'Ground'], ['surface', 'Surface'], ['line', 'Border'],
+      ['accent', 'Accent'], ['primary', 'Primary'], ['focus', 'Focus'], ['ink', 'Text'], ['muted', 'Muted']];
+    const swatches = swatchKeys.map(([k, n]) => ({ name: n, hex: pal[k] }));
+    const check = (name, fg, bg, target) => { const r = this.ratio(pal[fg], pal[bg]); return { name, ratio: r.toFixed(1) + ':1', verdict: r >= target ? 'AA pass' : 'fails AA', cls: r >= target ? 'cr-ok' : 'cr-bad' }; };
+    const checks = [check('Band text', 'band-ink', 'band', 4.5), check('Inactive tabs', 'band-muted', 'band', 4.5), check('Approve button', 'on-primary', 'primary', 4.5),
+      check('Accent on surface', 'accent', 'surface', 4.5), check('Muted text', 'muted', 'ground', 4.5)];
+    const palSource = man ? man.name + ' manifest' : 'Countersign default theme';
+    const palDetail = man
+      ? 'accent ' + man.accent + ', background ' + man.background + (dark ? (man.dark ? ' · dark from colors.dark (' + man.dark.accent + ', ' + man.dark.background + ')' : ' · dark derived (no colors.dark)') : '') + (open ? ' · Open mode: Approve uses the raw accent' : ' · Approve uses the clamped accent')
+      : (active ? active.host + ' sent no manifest, so the purple theme applies.' : 'No Integrator owns this screen.');
+    const fixedItems = ['countersign mark at the bottom, fixed colours', 'Verified origin beside the Integrator name', 'Request facts: same rows, order and wording',
+      'Warnings and errors: fixed colours and icon', 'Approve / Deny: fixed labels, order, equal size', 'Fingerprint, issuer, Access ends, disclosure at full contrast',
+      'Theme switch: banner and 1 s Approve lock'];
+    const fixedOn = open ? [false, false, true, true, false, false, false] : [true, true, true, true, true, true, true];
+    const fixedList = fixedItems.map((text, i) => ({ text, state: fixedOn[i] ? 'fixed' : 'off', cls: fixedOn[i] ? 'ck-on' : 'ck-off' }));
+
+    /* ---------- prototype controls ---------- */
+    const opt = (key, value, label, extra) => ({ label, cls: s[key] === value ? 'on' : '', pressed: s[key] === value,
+      pick: () => this.setState(Object.assign({ [key]: value, dialog: null }, extra || {})) });
+    const themeOpt = (value, label) => ({ label, cls: themePref === value ? 'on' : '', pressed: themePref === value, pick: () => this.setState({ theme: value }) });
+    const qOpt = (i, label) => ({ label, cls: s.screen === 'approval' && s.idx === i ? 'on' : '', pressed: s.screen === 'approval' && s.idx === i,
+      pick: () => this.setState({ screen: 'approval', idx: i, picked: null, preset: '1h', dialog: null }) });
+    const controls = [
+      { label: 'Screen', options: [opt('screen', 'approval', 'Approval queue'), opt('screen', 'pairing', 'Pairing confirmation'), opt('screen', 'integrators', 'Integrators list'),
+        opt('screen', 'detail', 'Integrator detail'), opt('screen', 'settings', 'Settings'), opt('screen', 'idle', 'No requests')] },
+      { label: 'Request in focus (switches the theme)', options: [qOpt(0, '1 · Harbor Ledger'), qOpt(1, '2 · Demo Integrator'), qOpt(2, '3 · No manifest')] },
+      { label: 'Integrator for pairing and detail', options: [opt('focusInt', 'harbor', 'Harbor Ledger'), opt('focusInt', 'demo', 'Demo Integrator'), opt('focusInt', 'none', 'No manifest')] },
+      { label: 'Guardrails', options: [opt('guard', 'strict', 'Strict'), opt('guard', 'middle', 'Middle ground (default)'), opt('guard', 'open', 'Open')] },
+      { label: 'Certificates', options: [opt('certs', 'two', 'Two, same name', { picked: null }), opt('certs', 'one', 'One', { picked: null }), opt('certs', 'expiring', 'One, expiring soon', { picked: null }), opt('certs', 'none', 'None eligible', { picked: null }), opt('certs', 'provider', 'Provider unavailable', { picked: null })] },
+      { label: 'Window width', options: [opt('width', 660, '660 px'), opt('width', 400, '400 px')] },
+      { label: 'Appearance', options: [themeOpt('system', 'System'), themeOpt('light', 'Light'), themeOpt('dark', 'Dark')] }
+    ];
+
+    /* ---------- header and tabs ---------- */
+    const undecidedCount = QUEUE.filter((_, i) => !s.decisions[i]).length;
+    const tabOf = { approval: 'requests', idle: 'requests', pairing: 'integrators', integrators: 'integrators', detail: 'integrators', settings: 'settings' };
+    const tabs = [{ id: 'requests', label: 'Requests', screen: 'approval' }, { id: 'integrators', label: 'Integrators', screen: 'integrators' }, { id: 'settings', label: 'Settings', screen: 'settings' }]
+      .map(t => ({ label: t.label, cls: tabOf[s.screen] === t.id ? 'on' : '', current: tabOf[s.screen] === t.id ? 'page' : 'false',
+        hasBadge: t.id === 'requests' && undecidedCount > 0, badge: String(undecidedCount), badgeLabel: undecidedCount + ' pending',
+        pick: () => this.setState({ screen: t.screen, dialog: null }) }));
+    const branded = !!man;
+
+    /* ---------- approval ---------- */
+    const qi = INT[q.int];
+    const offer = { origin: qi.origin, user: qi.user, context: q.context, host: q.host, scope: q.scope, maxDuration: 14400 };
+    const brand = qi.manifest ? { name: qi.manifest.name, copy: qi.manifest.copy, hasCopy: !!qi.manifest.copy, logo: qi.manifest.logo, logoFill: pal.accent } : null;
+
+    const FP1 = '778cf24949d2479a234335d05d81d8b9d578b616e63388254c5650c1d0ab5ec6';
+    const FP2 = 'c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b';
+    const EXP = new Date(2026, 10, 19, 18, 39, 30).getTime();
+    const C1 = { identity: 'CN=Demo user', issuer: 'CN=Countersign demo client-ca', expiresAt: EXP, fingerprint: FP1, reference: 'a' };
+    const C2 = { identity: 'CN=Demo user', issuer: 'CN=Countersign demo client-ca', expiresAt: EXP, fingerprint: FP2, reference: 'b' };
+    const C3 = Object.assign({}, C2, { expiresAt: NOW + 40 * 60000 });
+    const ids = s.certs === 'two' ? [C1, C2] : s.certs === 'one' ? [C2] : s.certs === 'expiring' ? [C3] : [];
+    const pickedRef = ids.length === 1 ? ids[0].reference : s.picked;
+    const sel = ids.find(c => c.reference === pickedRef) || null;
+    const diverge = (c) => {
+      const others = ids.filter(o => o !== c && o.identity === c.identity);
+      if (!others.length) return -1;
+      let d = 64;
+      for (const o of others) { let i = 0; while (i < 64 && o.fingerprint[i] === c.fingerprint[i]) i++; d = Math.min(d, i); }
+      return d;
+    };
+    const certs = ids.map(c => {
+      const d = diverge(c), groups = [];
+      for (let i = 0; i < 16; i++) { const st = i * 4; groups.push({ text: c.fingerprint.slice(st, st + 4), cls: d >= 0 && st + 4 > d && st < d + 8 ? 'hot' : '' }); }
+      return { identity: c.identity, issuer: c.issuer, validUntil: this.day(c.expiresAt).bare + ', 2026, ' + this.time(c.expiresAt),
+        cells: this.identicon(c.fingerprint, dark), groups, checked: pickedRef === c.reference, cls: pickedRef === c.reference ? 'on' : '',
+        pick: () => this.setState({ picked: c.reference }) };
+    });
+    const dupName = ids.length > 1 && ids.every(c => c.identity === ids[0].identity) ? ids[0].identity : '';
+
+    const PRESETS = [{ id: '15m', label: '15 min', s: 900 }, { id: '1h', label: '1 h', s: 3600 }, { id: '8h', label: '8 h', s: 28800 }, { id: 'custom', label: 'Custom' }];
+    const presets = PRESETS.map(p => ({ label: p.label, cls: s.preset === p.id ? 'on' : '', pressed: s.preset === p.id, disabled: p.s ? p.s > offer.maxDuration : false, pick: () => this.setState({ preset: p.id }) }));
+    const isCustom = s.preset === 'custom';
+    const secs = isCustom ? Math.round(Number(s.customValue) * 60) : PRESETS.find(p => p.id === s.preset).s;
+    const validDur = Number.isFinite(secs) && secs >= 60 && secs <= offer.maxDuration;
+    const end = NOW + (validDur ? secs : 0) * 1000;
+    const until = sel ? Math.min(end, sel.expiresAt) : end;
+    const untilDay = this.day(until), maxLabel = this.dur(offer.maxDuration), hasCerts = ids.length > 0;
+    let reason;
+    const locked = s.switching && !open;
+    if (locked) reason = 'Approve unlocks in a moment: this request is from a different Integrator.';
+    else if (!hasCerts) reason = 'No certificate can be approved for this request. You can deny it.';
+    else if (!sel) reason = 'Choose a certificate to continue.';
+    else if (!validDur) reason = 'Choose a duration up to ' + maxLabel + '.';
+    else reason = 'Approves ' + sel.identity + ' (' + this.group(sel.fingerprint.slice(0, 8)) + ') for ' + this.dur(secs) + '.';
+    const approveDisabled = locked || !hasCerts || !sel || !validDur;
+    const decided = s.decisions[s.idx] || null;
+    const nextIdx = QUEUE.findIndex((_, i) => i > s.idx && !s.decisions[i]);
+    const waiting = QUEUE.filter((_, i) => i !== s.idx && !s.decisions[i]).length;
+    const decide = (v) => this.setState({ decisions: Object.assign({}, s.decisions, { [s.idx]: v }) });
+
+    /* ---------- integrators ---------- */
+    const chipOf = (i) => i.manifest ? (dark ? this.derive(i.manifest, true).band : this.derive(i.manifest, false).band) : '#2b0548';
+    const openDialog = (dialog) => () => this.setState({ dialog });
+    const revRow = (id, host, context, scope, untilMs) => {
+      const r = s.rev[id];
+      return { host, context, scope, short: this.group(FP2.slice(0, 8)), until: this.time(untilMs),
+        status: r === 'recorded' ? 'Broker recorded revocation. Existing traffic ends at its lease deadline' : r === 'pending' ? 'Revocation queued for Broker confirmation' : 'Ready for handshakes',
+        statusCls: r === 'recorded' ? 'st-muted' : r === 'pending' ? 'st-warn' : 'st-ok', hasAction: r !== 'recorded', actLabel: r === 'pending' ? 'Retry revocation' : 'Revoke access',
+        act: () => this.setState({ rev: Object.assign({}, s.rev, { [id]: r === 'pending' ? 'recorded' : 'pending' }) }) };
+    };
+    const otherGone = !!s.disconnected.pr_91ab3c;
+    const dlgFor = (i) => ({
+      revokeAtIntegrator: openDialog({ id: 'revoke-int', title: 'Revoke this pairing at ' + i.host + '?', body: 'Countersign opens ' + i.origin + '/countersign/devices in your browser. Choose the pairing to forget there; its grants end with it.', confirm: 'Open in browser', cls: 'primary' }),
+      removeLocal: openDialog({ id: 'remove', title: 'Remove ' + i.host + ' from this computer?', body: "Deletes this computer's pairing key for " + i.origin + '. Access already granted stays active until you revoke it at the Integrator.', confirm: 'Remove from this computer', cls: 'danger' })
+    });
+    const demoOld = { name: 'Demo Integrator', copyOrDash: 'No description', accent: '#d9822b', background: '#fdf6ee' };
+    const demoNew = { name: 'Demo Integrator', copyOrDash: 'Reconciliation sandbox', accent: '#7a3e9d', background: '#f4edf9' };
+    const details = {
+      harbor: Object.assign({ origin: INT.harbor.origin, host: INT.harbor.host, name: 'Harbor Ledger', user: 'u-42', status: 'Connected', statusCls: 'st-ok', dotCls: '', chip: chipOf(INT.harbor),
+        reviewing: false, cur: demoOld, next: demoOld,
+        notices: otherGone ? [] : [{ title: 'Another Companion connected to this account', meta: 'Nov 17, 6:12 PM from 203.0.113.24, device pr_91ab3c' }],
+        hasApprovals: true, approvals: [revRow('a1', 'ledger.partner.example:443', 'close-q3', 'ledger.partner.example:443', NOW + 3600000),
+          revRow('a2', 'reports.team.example:9444', 'close-q3', '*.team.example:9444', NOW + 5400000), revRow('a3', 'ledger.partner.example:443', 'close-q2', 'ledger.partner.example:443', NOW + 1200000)],
+        hasDevices: true, multiDevice: !otherGone,
+        devices: [{ pairing: 'pr_4c21e9', isThis: true, state: 'Connected', addr: '198.51.100.7', canDisconnect: false },
+          { pairing: 'pr_91ab3c', isThis: false, state: otherGone ? 'Disconnected' : 'Connected', addr: '203.0.113.24', canDisconnect: !otherGone,
+            disconnect: openDialog({ id: 'disc', title: 'Disconnect device pr_91ab3c?', body: 'Its grants for https://portal.example are revoked. Traffic it already has stops by its current lease deadline.', confirm: 'Disconnect device', cls: 'danger' }) }],
+        disconnectAll: openDialog({ id: 'disc', title: 'Disconnect all other devices?', body: 'Every other Companion paired to u-42 at https://portal.example loses its pairing and grants. This computer stays paired.', confirm: 'Disconnect all others', cls: 'danger' }) }, dlgFor(INT.harbor)),
+      demo: Object.assign({ origin: INT.demo.origin, host: INT.demo.host, name: 'Demo Integrator', user: 'demo-user', status: 'Offline', statusCls: 'st-muted', dotCls: 'off', chip: chipOf(INT.demo),
+        reviewing: s.review === 'pending', cur: demoOld, next: demoNew,
+        acceptTheme: () => this.setState({ review: 'accepted', flash: 'New branding accepted for localhost:8443. The window now uses its colours.' }),
+        keepTheme: () => this.setState({ review: 'kept', flash: 'Kept the current branding for localhost:8443.' }),
+        notices: [], hasApprovals: false, approvals: [], hasDevices: false, devices: [], multiDevice: false }, dlgFor(INT.demo)),
+      none: Object.assign({ origin: INT.none.origin, host: INT.none.host, name: 'No branding', user: 'u-42', status: 'Connected', statusCls: 'st-ok', dotCls: '', chip: chipOf(INT.none),
+        reviewing: false, cur: demoOld, next: demoOld, notices: [], hasApprovals: true,
+        approvals: [revRow('a1', 'ledger.partner.example:443', 'nightly-export', 'ledger.partner.example:443', NOW + 7200000)],
+        hasDevices: false, devices: [], multiDevice: false }, dlgFor(INT.none))
+    };
+    const pairList = ['harbor', 'demo', 'none'].map(k => {
+      const d = details[k];
+      return { origin: d.origin, name: d.name, user: d.user, status: d.status, statusCls: d.statusCls, dotCls: d.dotCls, chip: d.chip,
+        summary: k === 'demo' ? 'branding change to review' : d.approvals.length + (d.approvals.length === 1 ? ' approval' : ' approvals'),
+        open: () => this.setState({ screen: 'detail', focusInt: k, flash: '' }) };
+    });
+    const dialog = s.dialog;
+    const confirmDialog = () => {
+      if (!dialog) return;
+      if (dialog.id === 'disc') this.setState({ dialog: null, disconnected: Object.assign({}, s.disconnected, { pr_91ab3c: true }), flash: 'Disconnected pr_91ab3c. Its grants are revoked.' });
+      else if (dialog.id === 'revoke-int') this.setState({ dialog: null, flash: 'Opened the Integrator’s device page in your browser.' });
+      else this.setState({ dialog: null, flash: 'Removed the local pairing key (prototype: the entry stays visible).' });
+    };
+    const focus = INT[s.focusInt];
+    const code = '7B9DF613D8';
+
+    return {
+      controls, tabs, swatches, checks, palSource, palDetail, modeLabel: dark ? 'dark' : 'light',
+      themeVars, widthClass: s.width === 400 ? 'w400' : 'w660', frameW: s.width,
+      modeName: strict ? 'Strict' : middle ? 'Middle ground' : 'Open', fixedList,
+      hdrCountersign: !branded || strict, hdrCompact: branded ? 'compact' : '', hdrOrigin: branded && strict, hdrIntegrator: branded && !strict,
+      hdrVerified: branded && middle, activeLogo: !!(man && man.logo), activeHasCopy: !!(man && man.copy), activeCopy: man ? man.copy : '',
+      activeHost: active ? active.host : '', activeName: man ? man.name : '',
+      actionsCls: branded && open ? 'loose' : 'fixed', fixedTextCls: open ? '' : 'fixedtext', showPowered: !open,
+      showBrandBox: !!brand && !middle,
+      approveLabel: branded && open ? 'Allow ' + man.name : 'Approve', denyLabel: branded && open ? 'Not now' : 'Deny',
+      showBanner: !!s.banner && !open, banner: s.banner, certExpiry: sel ? this.time(sel.expiresAt) : '',
+      showApproval: s.screen === 'approval', showIdle: s.screen === 'idle', showPairing: s.screen === 'pairing', showList: s.screen === 'integrators',
+      showDetail: s.screen === 'detail', showSettings: s.screen === 'settings',
+      qPos: s.idx + 1, qTotal: QUEUE.length, qWaiting: waiting ? waiting + ' more waiting' : 'No others waiting',
+      undecided: !decided, approved: decided === 'approved', denied: decided === 'denied', decidedAny: !!decided,
+      hasNext: nextIdx >= 0, noNext: nextIdx < 0, nextHost: nextIdx >= 0 ? INT[QUEUE[nextIdx].int].host : '',
+      nextRequest: () => {
+        if (nextIdx < 0) return;
+        const to = QUEUE[nextIdx].int, changes = to !== q.int && !open;
+        this.setState({ idx: nextIdx, picked: null, preset: '1h', switching: changes, banner: changes ? 'Now showing a request from ' + INT[to].host : '' });
+        if (changes) {
+          clearTimeout(this.t1); clearTimeout(this.t2);
+          this.t1 = setTimeout(() => this.setState({ switching: false }), 1000);
+          this.t2 = setTimeout(() => this.setState({ banner: '' }), 3500);
+        }
+      },
+      offer, originHost: qi.host, wide: offer.scope !== offer.host, scopeCls: offer.scope !== offer.host ? 'is-wide' : '',
+      hasBrand: !!brand, noBrand: !brand, brand: brand || { name: '', copy: '', hasCopy: false, logo: false, logoFill: '#000000' },
+      certs, dup: !!dupName, dupName, dupCount: ids.length, noneEligible: s.certs === 'none', providerDown: s.certs === 'provider', hasCerts,
+      presets, isCustom, customValue: s.customValue, maxLabel, onCustom: (e) => this.setState({ customValue: e.target.value }),
+      untilTime: this.time(until), untilDay: untilDay.long + (validDur ? ' · in ' + this.dur(Math.round((until - NOW) / 1000)) : ''), untilDayShort: untilDay.short,
+      capped: !!sel && sel.expiresAt < end, reason, approveDisabled,
+      approve: () => { if (!approveDisabled) decide('approved'); }, deny: () => decide('denied'),
+      selName: sel ? sel.identity : '', selShort: sel ? this.group(sel.fingerprint.slice(0, 8)) : '',
+      goIntegrators: () => this.setState({ screen: 'integrators' }),
+      focus, codeGrouped: code.match(/.{1,4}/g).join(' '), codeSpoken: 'Pairing code ' + code.split('').join(' '),
+      cancelPair: () => this.setState({ screen: 'integrators', flash: 'Pairing cancelled.' }),
+      confirmPair: () => this.setState({ screen: 'integrators', flash: 'Paired with ' + focus.origin + '.' }),
+      pairList, pr: details[s.focusInt], backToList: () => this.setState({ screen: 'integrators', flash: '' }),
+      flash: s.flash, hasFlash: !!s.flash, originInput: s.originInput, onOrigin: (e) => this.setState({ originInput: e.target.value }),
+      startPair: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'pairing', flash: '' }); },
+      login: s.login, toggleLogin: () => this.setState({ login: !s.login }),
+      dialogOpen: !!dialog, dialog: dialog || { title: '', body: '', confirm: '', cls: '' }, closeDialog: () => this.setState({ dialog: null }), confirmDialog,
+      reset: () => this.setState({ idx: 0, decisions: {}, switching: false, banner: '', picked: null, preset: '1h', customValue: '90', dialog: null, flash: '',
+        rev: { a1: null, a2: 'pending', a3: 'recorded' }, review: 'pending', disconnected: {}, originInput: '' })
+    };
+  }
+}
+</script>
+</body>
+</html>

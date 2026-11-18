@@ -9,27 +9,40 @@
   <script type="module" src="./renderer.js"></script>
 </head>
 <body>
-  <header>
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="3" y="8" width="18" height="6"/>
-      <rect x="11" y="18" width="18" height="6"/>
-    </svg>
-    <h1>Countersign</h1>
+  <header class="band">
+    <div class="brandrow" id="brand-countersign">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="3" y="8" width="18" height="6"/>
+        <rect x="11" y="18" width="18" height="6"/>
+      </svg>
+      <span class="wordmark">countersign</span>
+    </div>
+    <div class="brandrow" id="brand-integrator" hidden>
+      <img class="int-logo" id="int-logo" alt="" hidden>
+      <span class="int-text"><span class="int-name" id="int-name"></span><span class="int-copy" id="int-copy"></span></span>
+      <span class="verified-chip" id="int-origin"></span>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      <button type="button" class="tab" data-tab="requests">Requests<span class="badge" id="badge" hidden></span></button>
+      <button type="button" class="tab" data-tab="integrators">Integrators</button>
+      <button type="button" class="tab" data-tab="settings">Settings</button>
+    </nav>
   </header>
-  <main>
-    <section id="enrollment">
-      <h2>Pair an Integrator</h2>
-      <form id="pair"><label>Integrator origin <input id="origin" type="url" placeholder="https://integrator.example" required></label>
-        <button>Pair</button></form>
-      <div id="pending" role="status"></div>
-    </section>
-    <section aria-labelledby="requests-title">
-      <h2 id="requests-title">Approval requests</h2>
-      <div id="requests"></div>
-    </section>
-    <section aria-labelledby="pairs-title"><h2 id="pairs-title">Paired Integrators</h2><div id="pairs"></div></section>
-    <label><input id="login" type="checkbox"> Start at login</label>
-    <p id="feedback" role="alert"></p>
-  </main>
+  <main class="content" id="content"></main>
+  <footer class="footer">
+    <p class="feedback" id="feedback" role="alert"></p>
+    <span class="plate" role="img" aria-label="countersign">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="8" width="18" height="6"/><rect x="11" y="18" width="18" height="6"/></svg>
+      <span class="wm">countersign</span>
+    </span>
+  </footer>
+  <dialog id="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-body">
+    <h2 id="dialog-title"></h2>
+    <p id="dialog-body"></p>
+    <div class="btnrow">
+      <button type="button" class="btn" id="dialog-cancel">Cancel</button>
+      <button type="button" class="btn" id="dialog-confirm"></button>
+    </div>
+  </dialog>
 </body>
 </html>

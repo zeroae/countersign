@@ -58,7 +58,18 @@ Diagrams live in `docs/assets/diagrams/`, each with a light and a `-dark` varian
 python3 scripts/render_diagrams.py
 ```
 
-The pages embed both variants with the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, which GitHub and the handbook's theme toggle both honour. Capture UI changes from a packaged Companion paired to a disposable demo account. Save captures to `docs/assets/screenshots/raw/`, check the callout boxes in `scripts/annotate_screenshots.py` still frame the right rows, and run `uv run --with pillow scripts/annotate_screenshots.py` to write the annotated copies the pages embed. Confirm the selected certificate against the peer fingerprint before updating the walkthrough. The original [design and decision record](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/docs/specs/2026-11-17-countersign-design.md) remains available to contributors.
+The pages embed both variants with the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, which GitHub and the handbook's theme toggle both honour. The original [design and decision record](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/docs/specs/2026-11-17-countersign-design.md) remains available to contributors.
+
+### Screenshots
+
+Screenshots are rendered, not captured by hand. `scripts/capture_screenshots.mjs` loads the real Companion renderer and the demo Integrator page in Playwright's Chromium. A stubbed `window.countersign` API and fixture `/api` responses supply the data, so no Broker, Gateway or certificate store is involved. The clock, locale and time zone are fixed, and every shot is taken at twice its CSS size. The demo page is captured in light and dark; the Companion has no dark theme yet. From the checkout root, after `pnpm install`:
+
+```sh
+pnpm exec playwright install chromium   # once
+pnpm screenshots
+```
+
+The script writes raw captures and `boxes.json`, the CSS-pixel box of each highlighted element, to `docs/assets/screenshots/raw/`. `scripts/annotate_screenshots.py`, run by the same command, reads those boxes and draws the callouts onto the copies the pages embed. Change the fixtures or selectors in the capture script and the labels in the annotation script, then look at every changed image before committing. Set `CHROMIUM_PATH` or pass `--browser` to use another Chromium build, and `--only widget,job-result` to recapture a few shots. Every shot has a `-dark` twin, the Companion's included. Embed both with the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, as for diagrams. The Companion shots render `packages/companion/src` with a stubbed `window.countersign`; extend the stub when the preload API changes. CI does not run the capture.
 
 ## What CI and release tags produce
 

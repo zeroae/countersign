@@ -92,15 +92,38 @@ On logout, remove the subscription through the authenticated backend while the a
 
 ## Style the web controls
 
-`--countersign-font` sets the widget font and `--countersign-accent` sets the launch-link color. The component exposes `actions`, `launch` and `status` shadow parts. Page styles apply inside the browser.
+By default the widget draws a Countersign card: a purple band with the Countersign mark, a headline, the buttons and a status line. The emphasized button is **Pair Companion** until you add the `paired` attribute, then **Request access**, with pairing offered as a **Pair another computer** link. The stylesheet is a constructed stylesheet in the shadow root, so it also applies under a strict `style-src` Content Security Policy. Its colours follow the page's `color-scheme`: a page that declares `color-scheme: light dark` gets the dark palette in dark mode, and a page that declares nothing stays light.
+
+```html
+<countersign-widget paired>
+  <span slot="headline">Ready to request access</span>
+</countersign-widget>
+```
+
+| Hook | Use |
+| --- | --- |
+| `paired` attribute | Set it when the signed-in account already has a paired Companion. It moves the primary emphasis to **Request access** and turns **Pair Companion** into a secondary **Pair another computer** link, since the same account can pair more than one computer. |
+| `headline` slot | Replaces the default headline, “Approve with your desktop”. Use it for state only your page knows, such as pending or ended access. |
+| `--countersign-font` | Font family for the whole card. |
+| `--countersign-accent` | Colour of the **Open Companion** link and focus rings. |
+| `--countersign-band`, `--countersign-band-ink` | Header band background and its mark and wordmark. |
+| `--countersign-surface`, `--countersign-line`, `--countersign-ink`, `--countersign-muted` | Card background, borders, text and status text. |
+| `--countersign-primary`, `--countersign-primary-ink` | Background and text of the emphasized button. |
+
+Shadow parts let page styles replace any rule. `card`, `header`, `mark`, `wordmark`, `body`, `headline`, `actions`, `status` and `launch` (the **Open Companion** link) name the regions. Every button has the part `button` plus `pair`, `connect` or `push`. The emphasized one also has `primary`, and the **Pair another computer** link of a paired widget has `link`.
 
 ```css
 countersign-widget {
   --countersign-font: system-ui, sans-serif;
   --countersign-accent: #235a44;
 }
+countersign-widget::part(card) { border-radius: 0; }
+countersign-widget::part(button) { border-radius: 999px; }
+countersign-widget::part(primary) { background: #235a44; border-color: #235a44; }
 countersign-widget::part(status) { margin-block: .5rem; }
 ```
+
+Keep the controls recognisable as Countersign's. Page explanations, such as whether the Companion is offline or why access ended, belong outside the widget. The demo page shows one way to lay them out beside it. [Demo page](https://github.com/zeroae/countersign/blob/main/examples/demo-integrator/site/index.html)
 
 ## Brand the Companion prompt
 
@@ -112,7 +135,11 @@ Serve a UTF-8 JSON manifest at `https://<integrator-origin>/.well-known/counters
   "displayName": "Finance workspace",
   "copy": "Quarterly reconciliation",
   "logo": "/assets/finance.png",
-  "colors": { "accent": "#235a44", "background": "#f3f8f5" }
+  "colors": {
+    "accent": "#235a44",
+    "background": "#f3f8f5",
+    "dark": { "accent": "#7fcfa8", "background": "#0f1c16" }
+  }
 }
 ```
 
@@ -121,12 +148,33 @@ Serve a UTF-8 JSON manifest at `https://<integrator-origin>/.well-known/counters
 | `version`, `displayName` | Version `1` and display name up to 80 UTF-16 code units. |
 | `copy` | Optional text up to 240 UTF-16 code units. Text fields reject control and format characters. |
 | `colors.accent`, `colors.background` | Optional six-digit hex colors. Defaults are `#164e63` and `#ffffff`. |
+| `colors.dark` | Optional object with both `accent` and `background` as six-digit hex colors, used when the desktop is in dark mode. Without it the Companion derives dark colors from the light pair. |
 | `logo` | Optional relative or absolute same-origin PNG URL up to 1,024 UTF-16 code units. The download limit is 128 KiB and each dimension is at most 512 pixels. |
 
-The manifest has an 8 KiB limit. The Companion stores accepted branding with its pairing. A changed manifest appearance or changed logo image is presented for review. The user can keep the old appearance. On first pairing, an unavailable or invalid manifest leaves the verified origin visible with neutral branding. [Theme validation](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/packages/companion/src/theme.js)
+The manifest holds only these fields: hex colors and a PNG logo, with no CSS, fonts, SVG or HTML. It has an 8 KiB limit. The Companion stores accepted branding with its pairing. A change to any field, including `colors.dark` or the logo image at the same URL, is presented to the user for review on the Integrator's details page. The user can accept it or keep the current branding. On first pairing, an unavailable or invalid manifest leaves the Companion in its own theme, with the verified origin visible. [Theme validation](https://github.com/zeroae/countersign/blob/main/packages/companion/src/theme.js)
 
-![Companion approval for Demo Integrator, with the Integrator branding banner highlighted](../assets/screenshots/approval-branding.png)
+### How the Companion uses your branding
 
-![The same Companion approval screen for Harbor Ledger, with its different branding banner highlighted](../assets/screenshots/branding-alternate.png)
+While one of your requests, your pairing confirmation or your details page is on screen, the whole Companion window takes on your colors: the header band, window background, surfaces, borders, tabs, links, focus ring and the **Approve** fill. The header shows your logo, display name and copy. Lists, settings and Integrators without a manifest use Countersign's purple theme.
 
-Compare the branding area in the two prompts. The verified origin, exact host and approval scope, selected certificate, duration and **Approve**/**Deny** controls are drawn by the Companion.
+The Companion treats your two colors as a starting point. It derives the full palette in OKLCH, keeping your hue, and then adjusts lightness until every text and control pair meets WCAG AA contrast in both light and dark mode. A very light accent therefore becomes a darker header band and **Approve** fill, and a dark background stays dark only in dark mode. [Palette derivation](https://github.com/zeroae/countersign/blob/main/packages/companion/src/palette.js)
+
+![Companion approval for Harbor Ledger, the demo Integrator, in its teal colours. Callouts mark the header with its logo, name and copy beside the verified origin portal.example, the request facts box, and the fixed countersign mark at the bottom right.](../assets/screenshots/approval-branding.png#gh-light-mode-only)![Companion approval for Harbor Ledger, the demo Integrator, in its teal colours. Callouts mark the header with its logo, name and copy beside the verified origin portal.example, the request facts box, and the fixed countersign mark at the bottom right.](../assets/screenshots/approval-branding-dark.png#gh-dark-mode-only)
+
+![The same Companion approval screen for Lantern Audit, a second fictional Integrator, in its amber colours. Callouts mark its header and the Approve button, filled with its clamped accent.](../assets/screenshots/branding-alternate.png#gh-light-mode-only)![The same Companion approval screen for Lantern Audit, a second fictional Integrator, in its amber colours. Callouts mark its header and the Approve button, filled with its clamped accent.](../assets/screenshots/branding-alternate-dark.png#gh-dark-mode-only)
+
+### What stays the same in every theme
+
+No manifest value can change the labels, order or visibility of these parts, or recolor them:
+
+1. The countersign mark at the bottom right of the window, on a fixed plate.
+2. The verified origin, always next to your display name, for example "Harbor Ledger · portal.example ✓ verified". The name never appears alone.
+3. The request facts: account, Context, requested host and approval scope, always present in the same order and wording, in clamped colors only.
+4. Warnings and errors, such as a wildcard scope, an unavailable certificate provider, a certificate that ends access early, or no eligible certificate. They use a fixed component with an icon and fixed colors.
+5. **Deny** and **Approve**, with fixed labels, **Deny** first, equal size, and **Deny** outlined.
+6. Certificate details at full contrast: fingerprint, issuer, **Access ends** and the sentence saying the Gateway can read and send traffic until access ends.
+7. When the queue moves to a request from a different Integrator, a fixed **Now showing a request from** banner, with **Approve** disabled for about a second and the reason shown.
+
+Your logo appears only in the header, never beside the decision controls. Branding never reaches desktop notifications, which carry only a generic message.
+
+![A request from jobs.example, an Integrator without a manifest, in Countersign's purple theme with a note that the Integrator has not provided branding.](../assets/screenshots/branding-none.png#gh-light-mode-only)![A request from jobs.example, an Integrator without a manifest, in Countersign's purple theme with a note that the Integrator has not provided branding.](../assets/screenshots/branding-none-dark.png#gh-dark-mode-only)

@@ -5,7 +5,10 @@
 
 Give a remote job temporary access to an HTTPS service that requires a client certificate installed on your desktop. You choose the certificate, destination scope, and duration in the Companion. Your machine signs the TLS handshake. Your Integrator’s Gateway completes it and can read the traffic.
 
-<img src="docs/assets/screenshots/approval-selected.png" width="520" alt="Countersign approval on Linux showing the verified Integrator, requested host, two certificates, a selected fingerprint, duration, and Approve and Deny controls.">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/raw/approval-selected-dark.png">
+  <img src="docs/assets/screenshots/raw/approval-selected.png" width="520" alt="Countersign approval in the Integrator's colours, showing its name beside the verified origin, the checked request facts, two certificates with a selected fingerprint, duration presets, when access ends, and Deny and Approve controls.">
+</picture>
 
 **[Try it with curl](https://zeroae.github.io/countersign/try/).** Pair the Companion with the demo Integrator, pick one of the installed certificates, and compare its fingerprint with the one returned by the mTLS site. The demo runs its services and curl in Docker Compose. The Companion runs on your Linux desktop.
 
@@ -24,7 +27,10 @@ Run `npx @zeroae/countersign` to open the desktop installer on Windows or macOS,
 
 ## How the handshake works
 
-[![Countersign architecture showing the Workload and Gateway, the separate TLS connection to the protected site, and the desktop signing through the Broker.](docs/assets/diagrams/architecture.svg)](https://zeroae.github.io/countersign/architecture/)
+<a href="https://zeroae.github.io/countersign/architecture/"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/architecture-dark.svg">
+  <img src="docs/assets/diagrams/architecture.svg" width="680" alt="Countersign architecture showing the Workload and Gateway, the separate TLS connection to the protected site, and the desktop signing through the Broker.">
+</picture></a>
 
 Each Integrator hosts its own Broker and Gateway. Solid arrows carry the job's traffic. Dashed arrows carry authorization and signing messages. One desktop Companion can pair with several Integrators. The default Gateway runs beside one Workload. A shared Gateway is also available for Linux hosts.
 

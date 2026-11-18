@@ -46,6 +46,35 @@ test('malformed IDs and responses from a previous account cannot present a link'
   el.remove();
 });
 
+test('default card exposes stylable parts and keeps the original ones', () => {
+  const el = widget(async () => id);
+  const root = el.shadowRoot;
+  for (const name of ['card', 'header', 'mark', 'wordmark', 'body', 'headline', 'actions', 'status', 'launch']) {
+    assert.ok(root.querySelector(`[part~=${name}]`), name);
+  }
+  const part = action => root.querySelector(`[data-action=${action}]`).getAttribute('part').split(' ');
+  assert.deepEqual(part('pair'), ['button', 'pair', 'primary']);
+  assert.deepEqual(part('connect'), ['button', 'connect']);
+  assert.deepEqual(part('push'), ['button', 'push']);
+  assert.equal(root.querySelector('slot[name=headline]').textContent, 'Approve with your desktop');
+  assert.match(root.querySelector('style').textContent, /var\(--countersign-accent/);
+  el.remove();
+});
+
+test('a paired account moves the primary emphasis to Request access', () => {
+  const el = widget(async () => id);
+  const part = action => el.shadowRoot.querySelector(`[data-action=${action}]`).getAttribute('part');
+  const pair = el.shadowRoot.querySelector('[data-action=pair]');
+  el.setAttribute('paired', '');
+  assert.equal(part('pair'), 'button pair link');
+  assert.equal(pair.textContent, 'Pair another computer');
+  assert.equal(part('connect'), 'button connect primary');
+  el.removeAttribute('paired');
+  assert.equal(part('pair'), 'button pair primary');
+  assert.equal(pair.textContent, 'Pair Companion');
+  el.remove();
+});
+
 test('Web Push registration saves the browser subscription to the Integrator', async () => {
   const registration = { pushManager: {
     getSubscription: async () => null,

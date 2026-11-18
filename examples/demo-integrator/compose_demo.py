@@ -111,7 +111,25 @@ def devtools(child):
     return endpoints[0]
 
 
-def verify(desktop, browser, origin, fixture, curl):
+def record_job(state, url, completed):
+    """Save the Workload's last result for the Integrator's /job page."""
+    result={"url":url,"ok":completed.returncode==0}
+    if result["ok"]:
+        try:
+            body=json.loads(completed.stdout)
+            result.update(http_status=200,fingerprint=str(body["fingerprint"]),subject=str(body["subject"]))
+        except (ValueError,KeyError,TypeError):
+            result.update(ok=False,error="The site returned an unexpected response.")
+    else:
+        lines=completed.stderr.strip().splitlines()
+        result["error"]=lines[-1] if lines else f"curl exited with status {completed.returncode}."
+    target=state/"integrator"/"job.json"
+    staged=target.with_suffix(".next")
+    staged.write_text(json.dumps(result))
+    staged.replace(target)
+
+
+def verify(desktop, browser, origin, fixture, curl, state, url):
     from playwright.sync_api import sync_playwright, expect
     with sync_playwright() as pw:
         session=pw.chromium.connect_over_cdp(desktop)
@@ -121,8 +139,9 @@ def verify(desktop, browser, origin, fixture, curl):
         with web.expect_event("page", timeout=35000) as opened:
             desktop_page.get_by_role("button",name="Pair",exact=True).click()
         tab=opened.value
-        expect(desktop_page.locator("#pending")).to_contain_text("Pairing code")
-        code=desktop_page.locator("#pending").inner_text().split("Pairing code ")[-1].strip()
+        # The Companion shows the code grouped for reading, e.g. "7B9D F613 D8".
+        expect(desktop_page.locator("#pairing .code")).to_be_visible()
+        code=desktop_page.locator("#pairing .code").inner_text().replace(" ","")
         tab.get_by_label("Demo login secret").fill((fixture/"login.secret").read_text().strip())
         tab.get_by_role("button",name="Sign in").click()
         tab.get_by_label("Code from your Companion").fill(code)
@@ -136,13 +155,24 @@ def verify(desktop, browser, origin, fixture, curl):
                 expect(choices).to_have_count(3,timeout=45000)
                 approve=desktop_page.get_by_role("button",name="Approve",exact=True)
                 expect(approve).to_be_disabled()
-                fingerprint=choices.last.locator("small").inner_text().removeprefix("SHA-256 ")
+                fingerprint="".join(choices.last.locator(".fp-g").all_inner_texts())
+                if len(fingerprint)!=64:
+                    raise RuntimeError("The Companion did not show a full SHA-256 fingerprint")
                 choices.last.get_by_role("radio").check()
                 approve.click()
                 output,_=workload.communicate(timeout=60)
                 if workload.returncode or json.loads(output)["fingerprint"]!=fingerprint:
                     raise RuntimeError("Upstream did not accept the selected native certificate")
                 print("Compose mTLS accepted selected SHA-256 "+fingerprint,flush=True)
+                # The Integrator's job page reads the result the launcher records.
+                record_job(state,url,subprocess.CompletedProcess(curl,workload.returncode,output,""))
+                job=web.new_page()
+                job.goto(origin+"/job")
+                expect(job.locator("#job-fingerprint")).to_have_text(fingerprint)
+                job.get_by_label("SHA-256 you selected in the Companion").fill(fingerprint)
+                job.get_by_role("button",name="Compare").click()
+                expect(job.locator("#match")).to_be_visible()
+                print("Job page shows the fingerprint the site received",flush=True)
             finally:
                 if workload.poll() is None:
                     workload.terminate()
@@ -216,19 +246,24 @@ def session(args):
             return devtools(child) if args.verify else None
         browser_endpoint=start(browser_args+debug+[origin])
         desktop_endpoint=start([*prefix,str(app),"--user-data-dir="+str(state/"desktop"),"--password-store=gnome-libsecret",*debug])
-        curl=[*compose,"run","--rm","-T","workload","--fail","--silent","--show-error","--max-time","95",
-              "https://site.test:9444/"]
+        url="https://site.test:9444/"
+        curl=[*compose,"run","--rm","-T","workload","--fail","--silent","--show-error","--max-time","95",url]
         if args.verify:
-            verify(desktop_endpoint,browser_endpoint,origin,fixture,curl)
+            verify(desktop_endpoint,browser_endpoint,origin,fixture,curl,state,url)
             return
-        print(f"Enter {origin} in the Companion and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
+        print(f"In the Companion's Integrators tab, enter {origin} and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
         print("Enter the Companion pairing code in the browser and confirm the pairing in the Companion.")
         print("Type curl below to request https://site.test:9444/. Choose a certificate and approve in the Companion.")
+        print(f"The Integrator's {origin}/job page shows the fingerprint the site received.")
         print("Type quit to remove this demo's containers, keys, trust anchor and profiles.")
         for line in sys.stdin:
             if line.strip()=="quit": return
             if line.strip()=="curl":
-                subprocess.run(curl,timeout=110)
+                completed=subprocess.run(curl,timeout=110,capture_output=True,text=True)
+                sys.stdout.write(completed.stdout+"\n")
+                sys.stderr.write(completed.stderr)
+                record_job(state,url,completed)
+                print(f"Result saved. Open {origin}/job to compare the fingerprint with your approval.",flush=True)
             else: print("Enter curl or quit.")
 
 
