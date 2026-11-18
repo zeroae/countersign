@@ -20,7 +20,7 @@ from playwright.sync_api import sync_playwright, expect
 EXAMPLE=Path(__file__).resolve().parents[1]
 ROOT=EXAMPLE.parents[1]
 sys.path.insert(0,str(EXAMPLE))
-from prepare import prepare
+from prepare import prepare, start_demo_keyring
 
 
 def port():
@@ -33,13 +33,7 @@ def run(directory, app, count):
     directory.chmod(0o755)
     private=directory/'private';private.mkdir(mode=0o700)
     public=directory/'trust';public.mkdir(mode=0o755)
-    private_env=dict(XDG_DATA_HOME=str(private/'data'),XDG_CONFIG_HOME=str(private/'config'),
-                     XDG_RUNTIME_DIR=str(private/'runtime'))
-    (private/'runtime').mkdir(mode=0o700)
-    os.environ.update(private_env)
-    os.environ.pop('GNOME_KEYRING_CONTROL',None)
-    subprocess.run(['gnome-keyring-daemon','--unlock','--components=secrets'],
-                   input=secrets.token_hex(32).encode(),check=True,stdout=subprocess.DEVNULL)
+    start_demo_keyring(private)
     fixture=prepare(private/'demo', count=count)
     token_file=private/'workload.jwt'
     ca=fixture/'ca.pem'

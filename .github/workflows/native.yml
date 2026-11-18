@@ -30,6 +30,9 @@ jobs:
           architecture: ${{ matrix.os == 'windows-11-arm' && 'x64' || '' }}
       - name: Require a native Node process
         run: node -e "if (process.arch.toUpperCase() !== process.env.RUNNER_ARCH) process.exit(1)"
+      - name: Use a clean rustup directory on hosted Linux ARM64
+        if: matrix.os == 'ubuntu-24.04-arm'
+        run: echo "RUSTUP_HOME=$RUNNER_TEMP/countersign-rustup" >> "$GITHUB_ENV"
       - name: Install Linux providers
         if: runner.os == 'Linux'
         run: |

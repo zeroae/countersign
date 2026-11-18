@@ -152,7 +152,7 @@ def verify(desktop, browser, origin, fixture, curl):
 def session(args):
     from cryptography import x509
     from cryptography.hazmat.primitives import serialization
-    from prepare import prepare
+    from prepare import prepare, start_demo_keyring
     if os.getuid() in (0,65534):
         raise RuntimeError("Launch this desktop demo as a regular user distinct from workload UID 65534.")
     app=args.app.resolve()
@@ -164,12 +164,7 @@ def session(args):
         state=Path(tmp)
         os.umask(0o077)
         # All provider and desktop state belongs to this one private D-Bus session.
-        os.environ.update(XDG_DATA_HOME=str(state/"data"), XDG_CONFIG_HOME=str(state/"config"),
-                          XDG_RUNTIME_DIR=str(state/"runtime"))
-        (state/"runtime").mkdir()
-        os.environ.pop("GNOME_KEYRING_CONTROL",None)
-        run("gnome-keyring-daemon","--unlock","--components=secrets",input=secrets.token_hex(32).encode(),
-            stdout=subprocess.DEVNULL)
+        start_demo_keyring(state)
         fixture=prepare(state/"provider")
         project="countersign-demo-"+secrets.token_hex(5)
         profile,prefix=use_namespaces(stack,state,project)
