@@ -139,8 +139,9 @@ def verify(desktop, browser, origin, fixture, curl, state, url):
         with web.expect_event("page", timeout=35000) as opened:
             desktop_page.get_by_role("button",name="Pair",exact=True).click()
         tab=opened.value
-        expect(desktop_page.locator("#pending")).to_contain_text("Pairing code")
-        code=desktop_page.locator("#pending").inner_text().split("Pairing code ")[-1].strip()
+        # The Companion shows the code grouped for reading, e.g. "7B9D F613 D8".
+        expect(desktop_page.locator("#pairing .code")).to_be_visible()
+        code=desktop_page.locator("#pairing .code").inner_text().replace(" ","")
         tab.get_by_label("Demo login secret").fill((fixture/"login.secret").read_text().strip())
         tab.get_by_role("button",name="Sign in").click()
         tab.get_by_label("Code from your Companion").fill(code)
@@ -154,7 +155,9 @@ def verify(desktop, browser, origin, fixture, curl, state, url):
                 expect(choices).to_have_count(3,timeout=45000)
                 approve=desktop_page.get_by_role("button",name="Approve",exact=True)
                 expect(approve).to_be_disabled()
-                fingerprint=choices.last.locator("small").inner_text().removeprefix("SHA-256 ")
+                fingerprint="".join(choices.last.locator(".fp-g").all_inner_texts())
+                if len(fingerprint)!=64:
+                    raise RuntimeError("The Companion did not show a full SHA-256 fingerprint")
                 choices.last.get_by_role("radio").check()
                 approve.click()
                 output,_=workload.communicate(timeout=60)
@@ -248,7 +251,7 @@ def session(args):
         if args.verify:
             verify(desktop_endpoint,browser_endpoint,origin,fixture,curl,state,url)
             return
-        print(f"Enter {origin} in the Companion and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
+        print(f"In the Companion's Integrators tab, enter {origin} and choose Pair. Sign in to the demo tab using the secret from {fixture/'login.secret'}.")
         print("Enter the Companion pairing code in the browser and confirm the pairing in the Companion.")
         print("Type curl below to request https://site.test:9444/. Choose a certificate and approve in the Companion.")
         print(f"The Integrator's {origin}/job page shows the fingerprint the site received.")

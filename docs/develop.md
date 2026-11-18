@@ -69,7 +69,7 @@ pnpm exec playwright install chromium   # once
 pnpm screenshots
 ```
 
-The script writes raw captures and `boxes.json`, the CSS-pixel box of each highlighted element, to `docs/assets/screenshots/raw/`. `scripts/annotate_screenshots.py`, run by the same command, reads those boxes and draws the callouts onto the copies the pages embed. Change the fixtures or selectors in the capture script and the labels in the annotation script, then look at every changed image before committing. Set `CHROMIUM_PATH` or pass `--browser` to use another Chromium build, and `--only widget,job-result` to recapture a few shots. Embed a demo shot with its `-dark` twin and the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, as for diagrams. CI does not run the capture.
+The script writes raw captures and `boxes.json`, the CSS-pixel box of each highlighted element, to `docs/assets/screenshots/raw/`. `scripts/annotate_screenshots.py`, run by the same command, reads those boxes and draws the callouts onto the copies the pages embed. Change the fixtures or selectors in the capture script and the labels in the annotation script, then look at every changed image before committing. Set `CHROMIUM_PATH` or pass `--browser` to use another Chromium build, and `--only widget,job-result` to recapture a few shots. Every shot has a `-dark` twin, the Companion's included. Embed both with the `#gh-light-mode-only` and `#gh-dark-mode-only` suffixes, as for diagrams. The Companion shots render `packages/companion/src` with a stubbed `window.countersign`; extend the stub when the preload API changes. CI does not run the capture.
 
 ## What CI and release tags produce
 

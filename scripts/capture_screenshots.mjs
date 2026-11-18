@@ -45,22 +45,51 @@ const certificate = (reference, fingerprint) => ({
 });
 const harborLogo = 'data:image/png;base64,' +
   (await readFile(new URL('site/harbor-ledger.png', DEMO_DIR))).toString('base64');
-const harbor = { digest: 'harbor', name: manifest.displayName, copy: manifest.copy, logo: harborLogo,
-  accent: manifest.colors.accent, background: manifest.colors.background };
+const harbor = { digest: 'harbor', name: manifest.displayName, copy: manifest.copy,
+  accent: manifest.colors.accent, background: manifest.colors.background, dark: manifest.colors.dark, logo: harborLogo };
 // A second fictional Integrator, to show that branding belongs to the pairing.
-const lantern = { digest: 'lantern', name: 'Lantern Audit', copy: 'Engagement evidence room', logo: null,
-  accent: '#9a4a0c', background: '#fbefe2' };
+// It sets no dark colours, so the Companion derives them.
+const lantern = { digest: 'lantern', name: 'Lantern Audit', copy: 'Engagement evidence room',
+  accent: '#d9822b', background: '#fdf6ee', logo: null };
+const lanternNext = { digest: 'lantern-2', name: 'Lantern Audit', copy: 'Evidence room for FY26 fieldwork',
+  accent: '#7a3e9d', background: '#f4edf9', logo: null };
+const AUDIT = 'https://audit.example';
+const JOBS = 'https://jobs.example';
 const job = { user: 'u-42', context: 'close-q3', title: 'Q3 close reconciliation', workload: 'export-981',
   workload_generation: 1, host: 'ledger.partner.example:443' };
 const offer = (extra = {}) => ({
-  handle: 'offer-1', origin: PORTAL, user: job.user, context: job.context, theme: harbor,
-  host: job.host, scope: job.host, providerUnavailable: false, maxDuration: 28800, defaultDuration: 3600,
+  handle: 'offer-1', received: NOW.getTime() - 5000, pairing: 'harbor', origin: PORTAL, user: job.user,
+  context: job.context, theme: harbor, host: job.host, scope: job.host, providerUnavailable: false,
+  maxDuration: 28800, defaultDuration: 3600,
   identities: [certificate('first', fingerprints.first), certificate('selected', fingerprints.selected)], ...extra,
 });
-const snapshot = (extra = {}) => ({ offers: [], pairings: [], pending: '', confirmation: null, login: false, ...extra });
+const lanternOffer = (extra = {}) => offer({ handle: 'offer-2', received: NOW.getTime() - 2000, pairing: 'lantern',
+  origin: AUDIT, user: 'analyst-7', context: 'fy26-fieldwork', theme: lantern, host: 'evidence.audit.example:443',
+  scope: 'evidence.audit.example:443', identities: [certificate('selected', fingerprints.selected)], ...extra });
+const snapshot = (extra = {}) => ({ offers: [], pairings: [], pending: [], confirmation: null, login: true, ...extra });
 const approvalId = '85b80155-ac10-487f-a024-5216ec7f8ced';
-const device = { binding: { pairing: '7b9df613-d84e-4c1a-9a0e-2f6b1c3d5e7a', key: 'k1', channel_generation: 1 },
+const binding = pairing => ({ pairing, key: 'k-' + pairing.slice(0, 4), channel_generation: 1 });
+const device = { binding: binding('7b9df613-d84e-4c1a-9a0e-2f6b1c3d5e7a'),
   connected: true, connected_at_ms: NOW.getTime() - 600000, observed_address: '198.51.100.24' };
+const otherDevice = { binding: binding('91ab3c5e-0f27-4b8e-a6d1-c2e4f8a90b13'), connected: true,
+  connected_at_ms: NOW.getTime() - 1680000, observed_address: '203.0.113.24' };
+const approval = (id, extra) => ({ id, host: job.host, scope: job.host, context: job.context,
+  until: NOW.getTime() + 3600000, fingerprint: fingerprints.selected, revocation: undefined, ready: true, ...extra });
+const pairings = [
+  { id: 'harbor', origin: PORTAL, user: job.user, status: 'Connected', theme: harbor, pendingTheme: null,
+    devices: [{ ...device, self: true }, { ...otherDevice, self: false }],
+    notices: [{ id: 'n1', kind: 'concurrent_devices', occurred_at_ms: NOW.getTime() - 1680000,
+      observed_address: '203.0.113.24', actor: { pairing: otherDevice.binding.pairing } }],
+    approvals: [approval('a1'),
+      approval('a2', { host: 'reports.team.example:9444', scope: '*.team.example:9444', until: NOW.getTime() + 5400000,
+        revocation: 'pending', ready: false }),
+      approval('a3', { context: 'close-q2', until: NOW.getTime() + 1200000, revocation: 'recorded', ready: false })] },
+  { id: 'lantern', origin: AUDIT, user: 'analyst-7', status: 'Offline', theme: lantern, pendingTheme: lanternNext,
+    devices: [], notices: [], approvals: [] },
+  { id: 'jobs', origin: JOBS, user: job.user, status: 'Connected', theme: null, pendingTheme: null,
+    devices: [{ ...device, binding: binding('c3d1e8a2-5b7f-4e09-9a61-3f2b8d4c7e15'), self: true }], notices: [],
+    approvals: [approval('a4', { context: 'nightly-export', until: NOW.getTime() + 7200000 })] },
+];
 
 // ------------------------------------------------------------- page helpers
 async function newPage(browser, options) {
@@ -71,23 +100,46 @@ async function newPage(browser, options) {
   return page;
 }
 
-async function companion(browser, state) {
-  const page = await newPage(browser, { viewport: { width: 760, height: 1600 }, colorScheme: 'light' });
+// The Companion window, 660 pixels wide like the app, made tall enough that
+// nothing scrolls. `state` is the snapshot the main process would return.
+async function companion(browser, scheme, state) {
+  const page = await newPage(browser, { viewport: { width: 660, height: 760 }, colorScheme: scheme });
   await page.route(COMPANION + '**', async route => {
     const path = new URL(route.request().url()).pathname.slice(1) || 'index.html';
     if (!/^[a-z.]+\.(html|js|css)$/.test(path)) return route.fulfill({ status: 404 });
     await route.fulfill({ body: await readFile(new URL(path, COMPANION_SRC)), contentType: types[extname(path)] });
   });
-  // Stands in for preload.cjs. Only snapshot() returns data; the actions do nothing.
+  // Stands in for preload.cjs. Only snapshot() returns data; the actions do
+  // nothing. update() swaps the snapshot and announces it like the main process.
   await page.addInitScript(state => {
     const nothing = async () => {};
+    let listener = () => {};
     window.countersign = { snapshot: async () => state, pair: nothing, confirmPair: nothing, decide: nothing,
-      deny: nothing, theme: nothing, forgetOthers: nothing, revoke: nothing, removeLocal: nothing,
-      forget: nothing, login: nothing, changed: () => () => {} };
+      deny: nothing, theme: nothing, keepTheme: nothing, appearance: nothing, forgetOthers: nothing, revoke: nothing,
+      removeLocal: nothing, forget: nothing, login: nothing, changed: callback => { listener = callback; return () => {}; } };
+    window.update = next => { state = next; listener(); };
   }, state);
   await page.goto(COMPANION + 'index.html');
+  await page.locator('#content > .view').waitFor();
+  // Each newly shown request locks Approve for a second. The page clock is
+  // fixed, so move it past the lock.
+  await page.clock.setFixedTime(NOW.getTime() + 1500);
+  await page.waitForFunction(() => !document.querySelector('#reason')?.textContent.startsWith('Approve unlocks'));
   return page;
 }
+
+// Grow the window until the content no longer scrolls.
+async function fit(page) {
+  const extra = await page.evaluate(() => {
+    const content = document.getElementById('content');
+    return content.scrollHeight - content.clientHeight;
+  });
+  if (extra > 0) await page.setViewportSize({ width: 660, height: 760 + extra });
+}
+const window_ = async page => {
+  await fit(page);
+  return { x: 0, y: 0, ...page.viewportSize() };
+};
 
 // `api` answers the demo backend's /api routes; see examples/demo-integrator/integrator.js.
 async function portal(browser, colorScheme, api) {
@@ -180,55 +232,94 @@ const content = async (page, margin = 12) => {
 };
 
 // ------------------------------------------------------------------- shots
+// Each Companion shot runs once per color scheme.
 const companionShots = {
-  async 'approval-unselected'(browser) {
-    const page = await companion(browser, snapshot({ offers: [offer()] }));
-    await page.locator('#requests article').waitFor();
-    await capture(page, 'approval-unselected.png', { clip: around('#requests article', 0), selectors: {
-      identities: '#requests label.identity', approve: '#requests button.approve',
-      actions: '#requests .actions button',
+  async 'approval-unselected'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ offers: [offer(), lanternOffer()], pairings }));
+    await capture(page, name, { clip: window_, selectors: {
+      identities: '#requests .certs', actions: '.actions .decision', queue: '#requests .queue',
     } });
   },
-  async 'approval-selected'(browser) {
-    const page = await companion(browser, snapshot({ offers: [offer()] }));
-    await page.locator('#requests label.identity').nth(1).locator('input').check();
-    await capture(page, 'approval-selected.png', { clip: around('#requests article', 0), selectors: {
-      selected: '#requests label.identity:has(input:checked)',
-      expiry: { selector: '#requests article > p:has-text("Expires by")', text: true },
-      branding: '#requests .brand',
+  async 'approval-selected'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ offers: [offer()], pairings }));
+    await page.locator('#requests .identity').nth(1).locator('input').check();
+    await capture(page, name, { clip: window_, selectors: {
+      selected: '#requests .identity:has(input:checked)', expiry: '#requests .expires',
+      header: '#brand-integrator', plate: '.plate',
+      facts: '#requests .verified', presets: '#requests .seg',
     } });
   },
-  async 'scope-wildcard'(browser) {
-    const page = await companion(browser, snapshot({ offers: [offer({
+  async 'scope-wildcard'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings, offers: [offer({
       host: 'reports.team.example:9444', scope: '*.team.example:9444',
       identities: [certificate('selected', fingerprints.selected)],
     })] }));
-    await page.locator('#requests article').waitFor();
-    await capture(page, 'scope-wildcard.png', { clip: around('#requests article', 0), selectors: {
-      scope: { selector: '#requests dl > :is(dt, dd):nth-child(n+7)', text: true },
+    await capture(page, name, { clip: window_, selectors: {
+      scope: '#requests .fact:nth-child(n+4)', warning: '#requests .verified .alert',
     } });
   },
-  async 'branding-alternate'(browser) {
-    const page = await companion(browser, snapshot({ offers: [offer({
-      origin: 'https://audit.example', user: 'analyst-7', context: 'fy26-fieldwork', theme: lantern,
-      host: 'evidence.audit.example:443', scope: 'evidence.audit.example:443',
+  async 'branding-alternate'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings, offers: [lanternOffer()] }));
+    await capture(page, name, { clip: window_, selectors: {
+      header: '#brand-integrator', approve: '.actions .primary',
+    } });
+  },
+  async 'branding-none'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings, offers: [offer({
+      pairing: 'jobs', origin: JOBS, theme: null, context: 'nightly-export',
       identities: [certificate('selected', fingerprints.selected)],
     })] }));
-    await page.locator('#requests article').waitFor();
-    await capture(page, 'branding-alternate.png', { clip: around('#requests article', 0), selectors: {
-      branding: '#requests .brand',
+    await capture(page, name, { clip: window_, selectors: {
+      brand: '#brand-countersign', note: { selector: '#requests .nobrand', text: true },
     } });
   },
-  async 'pairing-companion'(browser) {
-    const page = await companion(browser, snapshot({
-      pending: PORTAL + ' · Pairing code 7B9DF613D8',
-      confirmation: { id: 'confirmation-1', origin: PORTAL, user: job.user, code: 'Pairing code 7B9DF613D8' },
-    }));
-    await page.locator('#origin').fill(PORTAL);
-    await page.getByRole('button', { name: 'Cancel pairing' }).waitFor();
-    await capture(page, 'pairing-companion.png', { clip: down('#enrollment'), selectors: {
-      confirmation: { selector: '#pending > p', text: true },
+  async 'queue-switch'(browser, scheme, name) {
+    const first = snapshot({ pairings, offers: [offer(), lanternOffer()] });
+    const page = await companion(browser, scheme, first);
+    // The Harbor Ledger request is decided elsewhere; Lantern Audit's moves up.
+    await page.evaluate(next => window.update(next), { ...first, offers: [lanternOffer()] });
+    await page.locator('.switch-banner').waitFor();
+    await capture(page, name, { clip: window_, selectors: {
+      banner: '.switch-banner', approve: '.actions .primary', reason: { selector: '#reason', text: true },
     } });
+  },
+  async 'pairing-companion'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({
+      pending: [{ id: 'harbor', origin: PORTAL, status: 'Pairing code 7B9DF613D8', code: '7B9DF613D8', theme: harbor }],
+      confirmation: { id: 'confirmation-1', pairing: 'harbor', origin: PORTAL, user: job.user, code: '7B9DF613D8', theme: harbor },
+    }));
+    await page.getByRole('button', { name: 'Cancel pairing' }).waitFor();
+    await capture(page, name, { clip: window_, selectors: {
+      facts: '#pairing .verified', code: '#pairing .code-box',
+    } });
+  },
+  async 'integrators-list'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings }));
+    await page.getByRole('button', { name: 'Integrators' }).click();
+    await capture(page, name, { clip: window_, selectors: { rows: '#pairs', pair: '#pair' } });
+  },
+  async 'integrator-detail'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings }));
+    await page.getByRole('button', { name: 'Integrators' }).click();
+    await page.locator('#pairs .int-row').first().click();
+    await capture(page, name, { clip: window_, selectors: {
+      notice: '#detail .alert', approvals: '#detail .row:has(.mono:text-is("' + job.host + '"))',
+      self: '#detail .tag',
+    } });
+  },
+  async 'branding-review'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings }));
+    await page.getByRole('button', { name: 'Integrators' }).click();
+    await page.locator('#pairs .int-row').nth(1).click();
+    await capture(page, name, { clip: window_, selectors: { review: '#detail .review', buttons: '#detail .review + p + .btnrow button' } });
+  },
+  async 'dialog-remove'(browser, scheme, name) {
+    const page = await companion(browser, scheme, snapshot({ pairings }));
+    await page.getByRole('button', { name: 'Integrators' }).click();
+    await page.locator('#pairs .int-row').nth(2).click();
+    await page.getByRole('button', { name: 'Remove from this computer' }).click();
+    await page.locator('dialog[open]').waitFor();
+    await capture(page, name, { clip: window_, selectors: { dialog: 'dialog[open]' } });
   },
 };
 
@@ -289,10 +380,7 @@ const sidecarFile = new URL('boxes.json', RAW);
 Object.assign(sidecar, only ? JSON.parse(await readFile(sidecarFile, 'utf8').catch(() => '{}')) : {});
 const browser = await chromium.launch(args.browser ? { executablePath: args.browser } : {});
 try {
-  for (const [name, shot] of Object.entries(companionShots)) {
-    if (!only || only.has(name)) await shot(browser);
-  }
-  for (const [name, shot] of Object.entries(portalShots)) {
+  for (const [name, shot] of [...Object.entries(companionShots), ...Object.entries(portalShots)]) {
     if (only && !only.has(name)) continue;
     await shot(browser, 'light', name + '.png');
     await shot(browser, 'dark', name + '-dark.png');

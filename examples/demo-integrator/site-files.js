@@ -15,4 +15,5 @@ export const contentSecurityPolicy =
 
 // The fictional brand the Companion shows for this demo.
 export const manifest = {version:1,displayName:'Harbor Ledger',copy:'Client reporting workspace',
-  logo:'/harbor-ledger.png',colors:{accent:'#0f6b6b',background:'#eef6f4'}};
+  logo:'/harbor-ledger.png',colors:{accent:'#0f6b6b',background:'#eef6f4',
+    dark:{accent:'#5cc8bd',background:'#0f1f1e'}}};

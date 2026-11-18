@@ -124,8 +124,10 @@ def run(directory, app, count):
             page.set_default_timeout(25000)
             page.get_by_label('Integrator origin').fill(origin)
             page.get_by_role('button',name='Pair',exact=True).click()
-            expect(page.locator('#pending')).to_contain_text('Pairing code',timeout=30000)
-            code=page.locator('#pending').inner_text().split('Pairing code ')[-1].strip()
+            # The Companion shows the code grouped for reading, e.g. "7B9D F613 D8".
+            expect(page.locator('#pairing .code')).to_be_visible(timeout=30000)
+            code=page.locator('#pairing .code').inner_text().replace(' ','')
+            assert code and code.isalnum(), code
             from urllib.parse import urlsplit,parse_qs
             attempt=parse_qs(urlsplit((private/'url').read_text().strip()).query)['attempt'][0]
             api('login',{'password':(fixture/'login.secret').read_text().strip()})
@@ -156,7 +158,8 @@ def run(directory, app, count):
                     approve=page.get_by_role('button',name='Approve',exact=True)
                     expect(approve).to_be_disabled()
                     selected=rows.last
-                    fingerprint=selected.locator('small').inner_text().removeprefix('SHA-256 ')
+                    fingerprint=''.join(selected.locator('.fp-g').all_inner_texts())
+                    assert len(fingerprint)==64, fingerprint
                     selected.get_by_role('radio').check()
                     approve.click()
                     output,errors=curl.communicate(timeout=60)
@@ -167,11 +170,16 @@ def run(directory, app, count):
                     if curl.poll() is None:curl.terminate();curl.wait(5)
             # Revocation is authenticated through the winning physical device. An automatic
             # retry of the same Workload and host must not create another approval.
+            page.get_by_role('button',name='Integrators',exact=True).click()
+            page.locator('#pairs .int-row').filter(has_text=origin).click()
             page.get_by_role('button',name='Revoke access',exact=True).click()
-            expect(page.locator('#pairs')).to_contain_text('Broker recorded revocation',timeout=15000)
+            expect(page.locator('#detail')).to_contain_text('Broker recorded revocation',timeout=15000)
             rejected=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
             assert rejected.returncode!=0 and not rejected.stdout, 'revoked access reached the site'
-            expect(page.locator('#requests .identity')).to_have_count(0)
+            # A new request would open the Requests tab and raise its count.
+            expect(page.locator('#detail')).to_be_visible()
+            expect(page.locator('#badge')).to_be_hidden()
+            expect(page.locator('.identity')).to_have_count(0)
             print(f'PASS: revoked access and suppressed automatic retry; selected one of {count} native identities; isolated curl and upstream confirmed {fingerprint}',flush=True)
 
 
