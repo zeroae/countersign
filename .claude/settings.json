@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "foresight@foresight-vendored": true,
+    "superpowers@foresight-vendored": false,
+    "mattpocock-skills@foresight-vendored": false
+  }
+}
