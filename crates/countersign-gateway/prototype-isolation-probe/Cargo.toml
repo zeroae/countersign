@@ -1,0 +1,12 @@
+# PROTOTYPE for issue #18. Throwaway: lives only on branch prototype/18-isolation-probe.
+[package]
+name = "isolation-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libc = "=0.2.191"
+
+# Its own workspace, so the Gateway's workspace never builds it.
+[workspace]
