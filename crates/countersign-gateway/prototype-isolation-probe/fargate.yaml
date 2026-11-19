@@ -134,7 +134,58 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: al2023
 
+  # Graviton: the v0.2.0 Gateway built for arm64 from its tag, and AL2023.
+  TaskDefinitionGatewayArm64:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-gateway-arm64"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: ARM64
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: probe
+          Image: !Sub "${Repository.RepositoryUri}:gateway-arm64"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: gateway-arm64
+
+  TaskDefinitionAl2023Arm64:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-al2023-arm64"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: ARM64
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: probe
+          Image: !Sub "${Repository.RepositoryUri}:al2023-arm64"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: al2023-arm64
+
 Outputs:
+  TaskDefinitionGatewayArm64:
+    Value: !Ref TaskDefinitionGatewayArm64
+  TaskDefinitionAl2023Arm64:
+    Value: !Ref TaskDefinitionAl2023Arm64
   TaskDefinitionAl2023:
     Value: !Ref TaskDefinitionAl2023
   RepositoryUri:
