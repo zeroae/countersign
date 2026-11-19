@@ -1,0 +1,41 @@
+# PROTOTYPE for issue #18. The same probe on an Amazon Linux 2023 base instead
+# of the Gateway image, run as the Gateway's uid, with AL2023's own bubblewrap.
+# Nothing here executes target-arch code at build time, so linux/amd64 builds
+# on an arm64 host without emulation.
+#
+#   docker buildx build --platform linux/amd64 -f Dockerfile.al2023 -t <registry>/isolation-probe:al2023 --push .
+
+FROM --platform=$BUILDPLATFORM rust:1.99-bookworm AS build
+ARG BUILDARCH
+ARG TARGETARCH
+WORKDIR /probe
+COPY Cargo.toml ./
+COPY src ./src
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) target=x86_64-unknown-linux-gnu; cc=x86_64-linux-gnu-gcc; pkg=gcc-x86-64-linux-gnu ;; \
+      arm64) target=aarch64-unknown-linux-gnu; cc=aarch64-linux-gnu-gcc; pkg=gcc-aarch64-linux-gnu ;; \
+      *) echo "unsupported $TARGETARCH"; exit 1 ;; \
+    esac; \
+    if [ "$TARGETARCH" != "$BUILDARCH" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends "$pkg" "libc6-dev-$TARGETARCH-cross"; \
+      rustup target add "$target"; \
+      export "CARGO_TARGET_$(echo "$target" | tr a-z- A-Z_)_LINKER=$cc"; \
+    fi; \
+    cargo build --release --target "$target"; \
+    cp "target/$target/release/isolation-probe" /isolation-probe
+
+# Unpack AL2023's bubblewrap RPM for the target arch without installing it.
+FROM --platform=$BUILDPLATFORM amazonlinux:2023 AS bwrap
+ARG TARGETARCH
+RUN set -eu; \
+    case "$TARGETARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; esac; \
+    dnf -y -q install cpio dnf-plugins-core; \
+    dnf -q download --forcearch="$arch" --destdir /rpms "bubblewrap.$arch"; \
+    mkdir /out && cd /out && rpm2cpio /rpms/bubblewrap-*.rpm | cpio -idm --quiet
+
+FROM amazonlinux:2023
+COPY --from=bwrap /out/usr/bin/bwrap /usr/bin/bwrap
+COPY --from=build /isolation-probe /usr/local/bin/
+USER 65531:65531
+ENTRYPOINT ["/usr/local/bin/isolation-probe"]

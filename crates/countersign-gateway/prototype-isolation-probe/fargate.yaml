@@ -110,7 +110,33 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: probe
 
+  # The same probe on an Amazon Linux 2023 base (Dockerfile.al2023), same uid.
+  TaskDefinitionAl2023:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-al2023"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: probe
+          Image: !Sub "${Repository.RepositoryUri}:al2023"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: al2023
+
 Outputs:
+  TaskDefinitionAl2023:
+    Value: !Ref TaskDefinitionAl2023
   RepositoryUri:
     Value: !GetAtt Repository.RepositoryUri
   Cluster:
