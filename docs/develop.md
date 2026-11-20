@@ -25,13 +25,15 @@ pnpm lint
 pnpm test
 ```
 
+To run the Gateway's tests under the filter sandbox on a host that refuses namespaces, run `scripts/filter-sandbox-container.sh`, which needs Docker. It runs the containment test and the runtime test in a container under Docker's default security profile, as the end-to-end workflow's `gateway-filter-sandbox` job does. Its two last steps use a profile with one quirk each: where the host refuses the allow-list, the filter sandbox has to fail at startup by name, and where the kernel has no `close_range`, a grant worker still has to start with no descriptor of the supervisor's.
+
 For the graphics and network path, run the [demo walkthrough](try.md) with `--verify` to automate the installed Companion and browser. The hosted end-to-end job also runs a separate harness that selects identities from candidate lists of different sizes, verifies the peer fingerprint and checks revocation. The native qualification jobs generate identities in disposable provider stores. On macOS and Windows use a disposable runner account for that harness because it changes user-level keychain or certificate-store state. [End-to-end workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/e2e.yml) · [Native qualification workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/native.yml)
 
 ## A grant worker died of SIGSYS
 
 The worker sandbox's filter kills a grant worker with `SIGSYS` when it makes a system call outside the allow-list, or a listed call with an argument the list refuses. One call is the exception: `clone3` fails as unsupported and kills nothing. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
 
-The kernel writes an audit line for each filter kill. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
+The kernel writes an audit line for each filter kill, under either worker sandbox. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
 
 ```sh
 journalctl -k | grep type=1326

@@ -11,7 +11,7 @@ docker build -f distribution/Dockerfile --target gateway -t countersign-gateway:
 
 ## Choose the network and trust boundaries
 
-Each parent calls the Integrator's Broker over TLS. The Companion maintains its own outbound authenticated connection to that Broker. The parent retains the real downstream and upstream sockets. A worker receives connected local streams and creates the downstream leaf key. It negotiates both TLS legs and asks the Broker, through its parent, for a scoped client signature. A worker has private mount, PID and network namespaces. A new approval gets its own worker, including when the same user selects the same certificate for another Context.
+Each parent calls the Integrator's Broker over TLS. The Companion maintains its own outbound authenticated connection to that Broker. The parent retains the real downstream and upstream sockets. A worker receives connected local streams and creates the downstream leaf key. It negotiates both TLS legs and asks the Broker, through its parent, for a scoped client signature. The [worker sandbox](#choose-a-worker-sandbox) keeps each worker from files, the network, the supervisor and other workers. A new approval gets its own worker, including when the same user selects the same certificate for another Context.
 
 ### Sidecar
 
@@ -19,10 +19,10 @@ Each parent calls the Integrator's Broker over TLS. The Companion maintains its 
 
 1. Put the Gateway and its one Workload on a private link. Bind `listen` only to the Workload-facing interface. Anyone who can connect to a sidecar listener can act as its Workload. In the Compose demo the upstream site shares the Gateway's backend network and cannot connect to its proxy port.
 2. Mount the Workload credential and configuration into the Gateway. Give the Gateway write access to a separate public trust directory. Mount that directory read-only at the same path in the Workload. Use separate principals and PID/mount namespaces, remove tracing privileges and keep the container engine socket outside the Workload. Protect the host's memory and swap according to the sensitivity of the traffic.
-3. Start `countersign-gateway serve gateway.json`. Startup probes an actual sandboxed worker. The sidecar creates a new CA and atomically publishes its public PEM at `ca_output`. Its CA key lives in parent memory until exit. The CA encodes critical DNS name constraints and excludes all IPv4 and IPv6 ranges. A wildcard constraint uses the bare DNS suffix, such as `corp.example`. The Gateway separately checks the exact port, label depth and apex policy. Client software is responsible for enforcing the constraint. The Gateway enforces destination policy and issues an exact-host leaf on every connection.
+3. Start `countersign-gateway serve gateway.json`. Startup probes an actual grant worker under the chosen worker sandbox and logs the sandbox and its layers. The sidecar creates a new CA and atomically publishes its public PEM at `ca_output`. Its CA key lives in parent memory until exit. The CA encodes critical DNS name constraints and excludes all IPv4 and IPv6 ranges. A wildcard constraint uses the bare DNS suffix, such as `corp.example`. The Gateway separately checks the exact port, label depth and apex policy. Client software is responsible for enforcing the constraint. The Gateway enforces destination policy and issues an exact-host leaf on every connection.
 4. Run `countersign-gateway env gateway.json` in the launcher and pass its exports to the Workload. Restrict direct egress if the job must use Countersign for a site. Check that the actual Workload UID can read the PEM and reach the proxy, and that it cannot read the private credential, Gateway memory or descriptors. The demo launcher performs these checks before sending curl traffic.
 
-Keep the Linux supervisor unprivileged. It requires `/usr/bin/bwrap` and permission to create user, mount, PID and network namespaces. On Ubuntu with restricted user namespaces the distribution supplies an opt-in `bwrap-userns-restrict` AppArmor profile in `apparmor-profiles`. Check both the host policy and the container's seccomp/AppArmor policy. The demo's container exceptions apply only to its Gateway. [Compose deployment and access checks](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/compose_demo.py) · [Service mounts and networks](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/compose.yaml)
+Keep the Linux supervisor unprivileged. With the default worker sandbox it requires `/usr/bin/bwrap` and permission to create user, mount, PID and network namespaces. On Ubuntu with restricted user namespaces the distribution supplies an opt-in `bwrap-userns-restrict` AppArmor profile in `apparmor-profiles`. Check both the host policy and the container's seccomp/AppArmor policy. The demo's container exceptions apply only to its Gateway. [Compose deployment and access checks](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/compose_demo.py) · [Service mounts and networks](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/compose.yaml)
 
 ### Shared Gateway
 
@@ -42,6 +42,38 @@ curl --noproxy '' --proxy https://gateway.corp.example:8443 \
 Choose a local issuing CA or an ACM-PCA-compatible service. For the local source, mount the issuer certificate chain and matching signing key only into the Gateway parent. For a remote source, let the parent obtain standard AWS SDK credentials. Grant issuance and retrieval for the intended authority and template. The issuer signs the worker's public CSR. The Gateway checks the resulting chain, public key, DNS SAN, server-auth usage and grant expiry before returning it to the worker. AWS Private CA and ZAE-ZCM use this same path. The configuration reference includes the standard profile and service endpoint settings. [Shared CA configuration](reference/config.md#shared-issuers)
 
 Maintain affinity between a live grant and the Gateway supervisor that first admitted it. A replacement process has a fresh boot identity. Retire the old grant and obtain a fresh approval when moving its Workload. The two-user integration fixture exercises concurrent workers and cutoff on Linux. A production shared deployment, its confinement policy and a live issuing service need qualification in their target environment.
+
+## Choose a worker sandbox
+
+The Gateway runs each grant in its own grant worker, a short-lived process that holds that grant's traffic keys. The worker sandbox is the OS isolation around every grant worker. Set it with the Gateway field `worker_sandbox`. Both values work in sidecar and shared mode, and the supervisor stays unprivileged under both: neither needs the Gateway to run as root.
+
+| `worker_sandbox` | Use it when | What isolates a grant worker |
+| --- | --- | --- |
+| `"namespaces"` (default, recommended) | The host lets an unprivileged process create user, mount, PID and network namespaces. | The base layers, inside namespaces that bubblewrap creates: the grant worker has its own filesystem, process and network view. Requires `/usr/bin/bwrap`. |
+| `"filter"` | The host refuses namespaces and you cannot change that, as on ECS Fargate. | The base layers alone. Does not use bubblewrap. |
+
+Every grant worker applies the same base layers to itself before it reads any input:
+
+- a seccomp allow-list of the system calls a grant worker needs, which kills the grant worker on any other call. It cannot open a file, open a socket, run a program or signal another process;
+- Landlock, at the version the kernel offers, as a second refusal of file access, and of TCP and signals on newer kernels. A kernel without Landlock still starts, and the startup log says so;
+- non-dumpable memory, so no other process of the same user can read it;
+- no inherited environment, and no open descriptors beyond its control socket and standard streams.
+
+Use the namespace sandbox wherever the host allows it. The filter sandbox gives up the namespace layer: a grant worker shares the supervisor's filesystem, process table and network stack, and only the base layers stand between it and them. Under the namespace sandbox a flaw in one base layer still leaves the grant worker in empty namespaces. Under the filter sandbox it does not.
+
+The Gateway never switches sandboxes on its own. Startup runs a grant worker under the sandbox you chose and logs what it applied:
+
+```text
+Gateway worker sandbox "namespaces": namespaces, non-dumpable, Landlock ABI v7, seccomp allow-list
+```
+
+When the sandbox cannot start, the Gateway exits with the sandbox, the layer that failed and the cause, and serves nothing:
+
+```text
+worker sandbox "namespaces" failed: namespaces: bwrap: No permissions to create new namespace
+```
+
+The layer is `namespaces` when bubblewrap could not run or the host refused its namespaces, `launch` when the filter sandbox could not start the grant worker, and otherwise the base layer that failed: `non-dumpable`, `Landlock` or `seccomp allow-list`. First try to fix what the host refused, using the [troubleshooting table](#audit-and-troubleshoot). Change `worker_sandbox` only after reading the trade-off above. [ADR 0001](https://github.com/zeroae/countersign/blob/main/docs/adr/0001-filter-sandbox-for-hosts-without-namespaces.md) records the decision and its evidence.
 
 ## Start the Broker and issue credentials
 
@@ -99,7 +131,7 @@ sqlite3 -readonly /state/broker.db \
 
 | Symptom | Where to look |
 | --- | --- |
-| Gateway exits with a worker sandbox startup error | Run under the intended service UID. Check bubblewrap availability, user namespace policy, library mounts and the container security profile. Verify the packaged Gateway rather than testing as root. |
+| Gateway exits with `worker sandbox "<sandbox>" failed: <layer>: <cause>` | Run under the intended service UID, and verify the packaged Gateway rather than testing as root. The layer says what the host refused. Under `"namespaces"`, layer `namespaces`: check that `/usr/bin/bwrap` exists, the host's user namespace policy, the library mounts and the container's seccomp and AppArmor profile. Under `"filter"`, layer `launch`: check that the Gateway can run its own executable. Under either, layer `non-dumpable`, `Landlock` or `seccomp allow-list`: the container security profile refuses a call the grant worker confines itself with, or the kernel lacks seccomp filters. A host that cannot create namespaces at all needs a deliberate choice: read [Choose a worker sandbox](#choose-a-worker-sandbox). |
 | CONNECT returns 407 | Shared clients need an HTTPS proxy and one proxy bearer header. Check the token audience, expiry, broker boot, and separate service credential. |
 | CONNECT returns 403 or keeps asking for approval | Compare rule ID, version, port, grant scope, memberships and stop controls. A denied or expired prompt requires an explicit retry. Check that the Companion is paired, online and can access the selected identity. |
 | CONNECT returns 429, 503 or 504 | Inspect limits per grant/user, Broker availability, worker fencing, clock synchronization and pending approval. Capture the safe `Countersign-Error` and `Countersign-Request-ID` response headers for correlation. |

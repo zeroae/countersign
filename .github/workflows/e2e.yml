@@ -33,6 +33,25 @@ jobs:
       - name: Name the system call when the worker sandbox's filter killed a grant worker
         if: failure()
         run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
+  gateway-filter-sandbox:
+    # A container under Docker's default security profile refuses namespaces,
+    # as ECS Fargate does. The script runs the containment test and the
+    # runtime test under the filter sandbox there, and proves that the
+    # namespace sandbox fails at startup with the named error.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the Gateway under the filter sandbox where namespaces are refused
+        run: scripts/filter-sandbox-container.sh
+      - name: Name the system call when the worker sandbox's filter killed a grant worker
+        if: failure()
+        run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
   curl:
     runs-on: ubuntu-24.04
     timeout-minutes: 40

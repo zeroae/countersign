@@ -118,7 +118,7 @@ impl Gateway {
                 return Err(Capacity.into());
             }
             let (fence, closed) = watch::channel(false);
-            let (process, exit) = ChildHandle::launch()?;
+            let (process, exit) = ChildHandle::launch(self.config.worker_sandbox)?;
             let slot = Slot {
                 fence,
                 requests: Arc::new(Semaphore::new(32)),
@@ -856,9 +856,10 @@ pub fn grant_worker() -> Result<()> {
     match countersign_gateway::worker_sandbox::confine() {
         Ok(layers) => worker::serve(layers),
         Err(error) => {
-            // The startup probe passes this on: the layer, then the cause.
-            eprintln!("{error}");
-            std::process::exit(1);
+            // The startup probe passes both on: the cause as written here,
+            // the layer as the exit status.
+            eprintln!("{}", error.source);
+            std::process::exit(worker::failed_layer_exit(error.layer));
         }
     }
 }
@@ -875,8 +876,19 @@ pub async fn run(args: &[String]) -> Result<()> {
     if verb != "serve" {
         return Err(invalid("unrecognized Gateway command"));
     }
-    let layers = ChildHandle::verify_environment().await?;
-    eprintln!("Gateway worker sandbox \"namespaces\": namespaces, {layers}");
+    let sandbox = config.worker_sandbox;
+    let layers = match ChildHandle::verify_environment(sandbox).await {
+        Ok(layers) => layers,
+        Err(error) => {
+            // In its own words, not as `main` would print it.
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    match sandbox.outer_layer() {
+        Some(outer) => eprintln!("Gateway worker sandbox \"{sandbox}\": {outer}, {layers}"),
+        None => eprintln!("Gateway worker sandbox \"{sandbox}\": {layers}"),
+    }
     let policy = config.policy()?;
     let broker = Broker::new(&config)?;
     let (issuer, tls) = if let Some(shared) = &config.shared {

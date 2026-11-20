@@ -1,7 +1,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use countersign_gateway::{
     upstream::{self, SigningRelay},
-    worker_sandbox::{Landlock, Layers},
+    worker_sandbox::{Landlock, Layer, Layers},
 };
 use countersign_protocol::{
     Origin,
@@ -34,7 +34,7 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::TlsAcceptor;
 
-use super::{Result, forward, invalid};
+use super::{Result, config::WorkerSandbox, forward, invalid};
 
 #[derive(Serialize, Deserialize)]
 pub struct Start {
@@ -102,9 +102,126 @@ pub async fn receive<T: DeserializeOwned>(socket: &mut tokio::net::UnixStream) -
     Ok(serde_json::from_slice(&buf)?)
 }
 
-/// Only public runtime libraries and the executable enter this grant's new
-/// mount, PID and network namespaces. Each inherited stream is private IPC.
-fn sandbox(executable: &std::path::Path) -> Command {
+/// The command that starts a grant worker under the chosen worker sandbox.
+/// Either way it gets a cleared environment, and it confines itself with the
+/// base layers once it runs.
+fn launch_command(sandbox: WorkerSandbox, executable: &std::path::Path) -> Command {
+    match sandbox {
+        WorkerSandbox::Namespaces => namespace_sandbox(executable),
+        WorkerSandbox::Filter => filter_sandbox(executable),
+    }
+}
+
+/// The filter sandbox: the supervisor starts the grant worker itself.
+fn filter_sandbox(executable: &std::path::Path) -> Command {
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new(executable);
+    command.env_clear();
+    let supervisor = std::process::id() as nix::libc::pid_t;
+    // SAFETY: the closure runs between fork and exec, and makes only system
+    // calls: no allocation, no locks.
+    unsafe {
+        command.pre_exec(move || {
+            use nix::libc;
+            let check = |result: libc::c_long| match result {
+                -1 => Err(std::io::Error::last_os_error()),
+                _ => Ok(()),
+            };
+            // What bubblewrap's --die-with-parent does under the namespace
+            // sandbox: a grant worker does not outlive its supervisor, whose
+            // end it would not see on its control socket. The supervisor may
+            // have ended before the request took effect.
+            check(libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL).into())?;
+            if libc::getppid() != supervisor {
+                return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            // Only the control socket and the standard streams stay open
+            // across the exec, whatever the supervisor itself inherited.
+            // Marked and not closed here: the standard library reports a
+            // failed exec over a descriptor of its own.
+            let marked = check(libc::syscall(
+                libc::SYS_close_range,
+                3 as libc::c_uint,
+                libc::c_uint::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            ));
+            // Linux before 5.11 has no such flag, and an older container
+            // profile refuses the call.
+            marked.or_else(|_| mark_each_close_on_exec())
+        });
+    }
+    command
+}
+
+/// Mark every descriptor above the standard streams close-on-exec, one at a
+/// time, as listed by the kernel. It fails when it cannot list or mark them.
+///
+/// # Safety
+/// Makes only system calls, with no allocation and no locks, so it may run
+/// between fork and exec, where the process has one thread.
+unsafe fn mark_each_close_on_exec() -> std::io::Result<()> {
+    use nix::libc;
+    let failed = std::io::Error::last_os_error;
+    // SAFETY (the whole body): every pointer stays inside `entries`, which
+    // the kernel filled with `read` bytes of whole directory entries, each
+    // with a NUL-terminated name. `dir` is open from here to the close below.
+    unsafe {
+        let dir = libc::open(
+            c"/proc/self/fd".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        );
+        if dir < 0 {
+            return Err(failed());
+        }
+        // Of 64-bit words: a directory entry starts with one.
+        let mut entries = [0u64; 512];
+        loop {
+            let read = libc::syscall(
+                libc::SYS_getdents64,
+                dir,
+                entries.as_mut_ptr(),
+                std::mem::size_of_val(&entries),
+            );
+            if read == 0 {
+                break;
+            }
+            if read < 0 {
+                return Err(failed());
+            }
+            let mut at = 0;
+            while at < read as usize {
+                let entry = entries
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(at)
+                    .cast::<libc::dirent64>();
+                at += (*entry).d_reclen as usize;
+                // The name is the descriptor's number. `.` and `..` are not one.
+                let mut digit = (&raw const (*entry).d_name).cast::<u8>();
+                let mut fd: libc::c_int = 0;
+                while (*digit).is_ascii_digit() {
+                    fd = fd * 10 + libc::c_int::from(*digit - b'0');
+                    digit = digit.add(1);
+                }
+                if *digit != 0 || fd <= 2 {
+                    continue;
+                }
+                if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) < 0 {
+                    return Err(failed());
+                }
+            }
+        }
+        // Itself close-on-exec, and closed on every other path by the exit
+        // that follows a failed launch.
+        libc::close(dir);
+    }
+    Ok(())
+}
+
+/// The namespace sandbox: only public runtime libraries and the executable
+/// enter this grant's new mount, PID and network namespaces. Each inherited
+/// stream is private IPC.
+fn namespace_sandbox(executable: &std::path::Path) -> Command {
     let mut command = Command::new("/usr/bin/bwrap");
     command
         .env_clear()
@@ -126,6 +243,36 @@ fn sandbox(executable: &std::path::Path) -> Command {
         .arg(executable)
         .args(["/worker", "--chdir", "/", "--", "/worker"]);
     command
+}
+
+/// Why the startup probe failed: the chosen worker sandbox, the layer that
+/// failed and the cause. It names no other sandbox: the operator reads the
+/// trade-off before choosing one (ADR 0001, decision 4).
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "worker sandbox \"{sandbox}\" failed: {layer}: {cause}\nSee \"Choose a worker sandbox\" in the operator guide: https://zeroae.github.io/countersign/operate/#choose-a-worker-sandbox"
+)]
+pub struct SandboxError {
+    sandbox: WorkerSandbox,
+    layer: String,
+    cause: String,
+}
+
+/// The exit status of a grant worker that could not apply a base layer. It
+/// carries the layer to the startup probe, through bubblewrap too, which
+/// exits with the status of the grant worker it ran. The cause is on the
+/// standard error stream.
+pub const fn failed_layer_exit(layer: Layer) -> i32 {
+    match layer {
+        Layer::NonDumpable => 64,
+        Layer::Landlock => 65,
+        Layer::AllowList => 66,
+    }
+}
+fn failed_layer(status: ExitStatus) -> Option<Layer> {
+    [Layer::NonDumpable, Layer::Landlock, Layer::AllowList]
+        .into_iter()
+        .find(|layer| status.code() == Some(failed_layer_exit(*layer)))
 }
 
 /// Resolves with a grant worker's exit status when it ends on its own, and
@@ -164,21 +311,25 @@ pub struct ChildHandle {
     _stop: tokio::sync::oneshot::Sender<()>,
 }
 impl ChildHandle {
-    fn start(stderr: Stdio) -> Result<(tokio::process::Child, UnixDatagram)> {
+    fn start(
+        sandbox: WorkerSandbox,
+        stderr: Stdio,
+    ) -> Result<(tokio::process::Child, UnixDatagram)> {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
-        let process = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
-            .kill_on_drop(true)
-            .arg("grant-worker")
-            .stdin(Stdio::from(OwnedFd::from(child_control)))
-            .stdout(Stdio::null())
-            .stderr(stderr)
-            .spawn()?;
+        let process =
+            tokio::process::Command::from(launch_command(sandbox, &std::env::current_exe()?))
+                .kill_on_drop(true)
+                .arg("grant-worker")
+                .stdin(Stdio::from(OwnedFd::from(child_control)))
+                .stdout(Stdio::null())
+                .stderr(stderr)
+                .spawn()?;
         Ok((process, control))
     }
 
-    pub fn launch() -> Result<(Self, Exit)> {
-        let (mut process, control) = Self::start(Stdio::null())?;
+    pub fn launch(sandbox: WorkerSandbox) -> Result<(Self, Exit)> {
+        let (mut process, control) = Self::start(sandbox, Stdio::null())?;
         let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
         let (report, exit) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
@@ -202,14 +353,45 @@ impl ChildHandle {
         ))
     }
 
-    /// Check the actual host sandbox, executable and control socket at startup.
-    /// This short-lived worker receives no grant, credentials or traffic. It
-    /// confines itself as every grant worker does and reports its layers.
-    pub async fn verify_environment() -> Result<Layers> {
-        let (process, control) = Self::start(Stdio::piped())?;
-        control.send(&[0])?;
-        let output =
-            tokio::time::timeout(Duration::from_secs(5), process.wait_with_output()).await??;
+    /// Check the chosen worker sandbox, the executable and the control socket
+    /// at startup. This short-lived worker receives no grant, credentials or
+    /// traffic. It confines itself as every grant worker does and reports its
+    /// layers.
+    pub async fn verify_environment(
+        sandbox: WorkerSandbox,
+    ) -> std::result::Result<Layers, SandboxError> {
+        Self::probe(sandbox)
+            .await
+            .map_err(|(layer, cause)| SandboxError {
+                sandbox,
+                layer: match layer {
+                    Some(base) => base.to_string(),
+                    // Not a base layer's failure, so the supervisor's: the
+                    // layer it adds, or under the filter sandbox, which adds
+                    // none, the launch itself.
+                    None => sandbox.outer_layer().unwrap_or("launch").to_owned(),
+                },
+                cause,
+            })
+    }
+
+    /// The probe's layers, or the base layer that failed, when it was one,
+    /// and the cause.
+    async fn probe(sandbox: WorkerSandbox) -> std::result::Result<Layers, (Option<Layer>, String)> {
+        let supervisor = |error: &dyn std::fmt::Display| (None, error.to_string());
+        let (process, control) =
+            Self::start(sandbox, Stdio::piped()).map_err(|error| supervisor(&error))?;
+        control.send(&[0]).map_err(|error| supervisor(&error))?;
+        let output = tokio::time::timeout(Duration::from_secs(5), process.wait_with_output())
+            .await
+            .map_err(|_| supervisor(&"the probe grant worker did not finish in 5 seconds"))?
+            .map_err(|error| supervisor(&error))?;
+        if killed_by_filter(output.status) {
+            return Err((
+                Some(Layer::AllowList),
+                "the allow-list killed the probe grant worker (SIGSYS)".to_owned(),
+            ));
+        }
         if !output.status.success() {
             let hint: String = String::from_utf8_lossy(&output.stderr)
                 .split_whitespace()
@@ -218,17 +400,20 @@ impl ChildHandle {
                 .chars()
                 .take(512)
                 .collect();
-            return Err(std::io::Error::other(format!(
-                "Gateway worker sandbox failed to start ({}): {hint}",
-                output.status
-            ))
-            .into());
+            return Err((
+                failed_layer(output.status),
+                if hint.is_empty() {
+                    format!("the probe grant worker ended with {}", output.status)
+                } else {
+                    hint
+                },
+            ));
         }
         // The report was queued before the probe exited.
         let mut message = [0u8; 2];
         match control.recv(&mut message) {
             Ok(1) => Ok(reported([message[0]])),
-            _ => Err(invalid("grant worker reported no worker sandbox layers")),
+            _ => Err(supervisor(&"the probe grant worker reported no layers")),
         }
     }
 
@@ -503,6 +688,31 @@ mod tests {
     use super::*;
     use std::{fs, net::TcpListener, path::Path};
     #[test]
+    fn filter_sandbox_launch_passes_on_no_descriptor_and_no_environment() {
+        // A descriptor the supervisor inherited open across exec, as `dup`
+        // leaves one.
+        let file = fs::File::open("/dev/null").unwrap();
+        // SAFETY: `dup` takes a descriptor number and returns a new one, closed below.
+        let inherited = unsafe { nix::libc::dup(std::os::fd::AsRawFd::as_raw_fd(&file)) };
+        assert!(inherited > 2);
+        // sh and env stand in for the grant worker, started as the supervisor starts one.
+        let descriptors = filter_sandbox(Path::new("/bin/sh"))
+            .args(["-c", r#"test ! -e /proc/self/fd/"$1""#, "probe"])
+            .arg(inherited.to_string())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        // SAFETY: closes the descriptor `dup` returned above, once.
+        unsafe { nix::libc::close(inherited) };
+        assert!(descriptors.status.success(), "{descriptors:?}");
+        assert!(std::env::vars_os().next().is_some());
+        let environment = filter_sandbox(Path::new("/usr/bin/env")).output().unwrap();
+        assert!(
+            environment.status.success() && environment.stdout.is_empty(),
+            "{environment:?}"
+        );
+    }
+    #[test]
     fn worker_namespace_excludes_parent_files_and_parent_network() {
         let marker =
             std::env::temp_dir().join(format!("countersign-isolation-{}", uuid::Uuid::new_v4()));
@@ -511,7 +721,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port().to_string();
         // Use bash only as the test executable, under the same namespace
         // and mount configuration as a production grant worker.
-        let result=sandbox(Path::new("/bin/bash"))
+        let result=namespace_sandbox(Path::new("/bin/bash"))
             .args(["-c", r#"test ! -e "$1" && test ! -e /proc/1/mem && ! (echo probe > /dev/tcp/127.0.0.1/"$2")"#,"probe"])
             .arg(&marker).arg(port).output();
         fs::remove_file(marker).unwrap();
