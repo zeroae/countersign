@@ -724,9 +724,9 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         (before + 899_000..=millis() + 900_000).contains(&expires),
         "{expires}"
     );
-    assert!(
-        expires.abs_diff(first_expiry) < 1000,
-        "{expires} vs {first_expiry}"
+    assert_eq!(
+        expires, first_expiry,
+        "the deadline the Companion was given"
     );
 
     let renewed: Value = h
@@ -786,8 +786,37 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     assert!(denied.get("certificate").is_none(), "{denied}");
     assert_eq!(status(&h, &second).await["state"], "approved");
 
+    let lapsed: Value = h
+        .post(
+            "backend/renew",
+            BACKEND,
+            json!({"binding":credentials["binding"],"id":second}),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(lapsed["id"], refused["id"]);
     let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
-    let ended = db
+    db.execute(
+        "UPDATE approval SET pending_until=unixepoch()-5 WHERE id=?1",
+        [lapsed["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    let never_granted = status(&h, &lapsed["id"]).await;
+    assert_eq!(never_granted["state"], "expired");
+    assert!(
+        never_granted.get("expires_at_ms").is_none(),
+        "{never_granted}"
+    );
+    assert!(
+        never_granted.get("certificate").is_none(),
+        "{never_granted}"
+    );
+
+    let expired_at_s = db
         .query_row(
             "UPDATE approved_grant SET expires_at=unixepoch()-5 WHERE approval=?1 RETURNING expires_at",
             [second.as_str().unwrap()],
@@ -797,6 +826,6 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     let expired = status(&h, &second).await;
     assert_eq!(expired["state"], "expired");
     assert_eq!(expired["ready"], false);
-    assert_eq!(expired["expires_at_ms"], ended * 1000);
+    assert_eq!(expired["expires_at_ms"], expired_at_s * 1000);
     assert_eq!(expired["certificate"]["sha256"], sha256.as_str());
 }

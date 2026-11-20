@@ -175,14 +175,14 @@ pub(super) async fn status(
             |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,
                 r.get::<_,Option<i64>>(5)?,r.get::<_,Option<String>>(6)?)),
         ).optional()?.ok_or(Fault::Unavailable)?;
-        let (state, grant, accepted, ingress_closed, egress_closed, expires_at, certificate) = row;
+        let (state, grant, accepted, ingress_closed, egress_closed, expires_at, certificate_sha256) = row;
         let ready = state=="approved" && grant.and_then(|id|a.grants.get(&id)).is_some_and(|g|{
             g.acknowledged && a.peers.get(g.activation.grant.device.pairing.as_str()).is_some_and(|p|p.binding==g.activation.grant.device)
         });
         let mut view = json!({"id":req.id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed});
         // A grant row outlives its approval's end (expired, replaced, cancelled), so these
         // keep describing the grant that was approved; an approval that never had one omits them.
-        if let (Some(expires_at), Some(sha256)) = (expires_at, certificate) {
+        if let (Some(expires_at), Some(sha256)) = (expires_at, certificate_sha256) {
             view["expires_at_ms"] = json!(expires_at.checked_mul(1000).ok_or(Fault::Storage)?);
             view["certificate"] = json!({"sha256": sha256});
         }
