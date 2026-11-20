@@ -7,6 +7,31 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  gateway-arm64:
+    # The seccomp allow-list is written per architecture, so the grant worker
+    # is exercised on arm64 as well as on the x86-64 job below.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y apparmor-profiles bubblewrap libnss-wrapper
+      - name: Enable the distribution's bubblewrap profile when the host restricts user namespaces
+        run: |
+          if ! bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true; then
+            sudo apparmor_parser --replace /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+            bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true
+          fi
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install -r examples/demo-integrator/test/fixture-requirements.txt
+      - run: cargo test --locked -p countersign-gateway
+      - name: Exercise shared and sidecar workers and lease cutoff
+        run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
+      - name: Name the system call when the worker sandbox's filter killed a grant worker
+        if: failure()
+        run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
   curl:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
