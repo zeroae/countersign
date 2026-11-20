@@ -199,6 +199,15 @@ class GitHooksTests(unittest.TestCase):
                 unset = run(["git", "config", "core.hooksPath"], self.main, check=False)
                 self.assertEqual(unset.stdout, "")
 
+    def test_session_start_installs_when_the_hooks_folder_is_a_symlink(self):
+        hooks = self.main / ".git/hooks"
+        moved = self.tmp / "hooks-folder"
+        shutil.move(hooks, moved)
+        hooks.symlink_to(moved)
+        self.start_session(self.worktree)
+        hooks_path = run(["git", "config", "core.hooksPath"], self.main).stdout.strip()
+        self.assertEqual(hooks_path, ".githooks")
+
     def test_hook_runs_no_build_no_test_and_no_network(self):
         self.start_session(self.worktree)
         shims = self.tmp / "shims"

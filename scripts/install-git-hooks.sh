@@ -16,7 +16,7 @@ case "$current" in
   .githooks) ;;
   "")
     hooks=$(git rev-parse --path-format=absolute --git-common-dir)/hooks
-    existing=$(find "$hooks" -maxdepth 1 ! -type d ! -name '*.sample' -exec basename {} \; 2>/dev/null | sort | tr '\n' ' ')
+    existing=$(find "$hooks/" -maxdepth 1 ! -type d ! -name '*.sample' -exec basename {} \; 2>/dev/null | sort | tr '\n' ' ')
     if [ -n "$existing" ]; then
       echo "$hooks holds hooks (${existing% }) that core.hooksPath would stop running, so the pre-commit hook in .githooks/ is not installed. Move them into .githooks/ or elsewhere, then run scripts/install-git-hooks.sh." >&2
       exit 0
