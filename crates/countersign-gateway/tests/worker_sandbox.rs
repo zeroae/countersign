@@ -29,17 +29,22 @@ mod linux {
             fd::{AsRawFd, FromRawFd, OwnedFd},
             unix::{
                 net::{UnixDatagram, UnixStream},
-                process::ExitStatusExt,
+                process::{CommandExt, ExitStatusExt},
             },
         },
         process::{Child, Command, Stdio},
+        time::{Duration, Instant},
     };
 
-    /// The host a stand-in runs on.
+    /// How a stand-in is set up: unconfined, confined, or confined on a host
+    /// that lacks or refuses one system call.
     const UNCONFINED: &str = "unconfined";
     const CONFINED: &str = "confined";
     const NO_LANDLOCK: &str = "no-landlock";
     const LANDLOCK_REFUSED: &str = "landlock-refused";
+    /// Docker's default profile answers `clone3` this way, and the C library
+    /// then starts threads with `clone`.
+    const NO_CLONE3: &str = "no-clone3";
 
     /// Stands in for a secret in the supervisor's or a grant worker's memory.
     static SECRET: [u8; 16] = *b"keep-this-secret";
@@ -51,10 +56,15 @@ mod linux {
         // each stand-in opt out, so the worker sandbox is what refuses them.
         // SAFETY: the option takes one integer. Without Yama it fails, unneeded.
         unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0) };
-        if let [role, mode] = args.as_slice()
-            && role == "stand-in"
-        {
-            stand_in(mode);
+        match args.as_slice() {
+            [role, setup] if role == "stand-in" => stand_in(setup),
+            // The Gateway's own grant worker, on a host with this quirk.
+            [role, setup, program, argument] if role == "stand-in" => {
+                host_quirk(setup);
+                let error = Command::new(program).arg(argument).exec();
+                panic!("{program}: {error}");
+            }
+            _ => {}
         }
         let mut failed = 0;
         for (name, test) in TESTS {
@@ -72,17 +82,32 @@ mod linux {
 
     // ---------- the stand-in grant worker ----------
 
-    fn stand_in(host: &str) -> ! {
-        let layers = if host == UNCONFINED {
+    /// A host that lacks or refuses one system call, stood in for by a filter
+    /// of the test's own that answers for the kernel.
+    fn host_quirk(setup: &str) {
+        match setup {
+            NO_LANDLOCK => fail_with(libc::SYS_landlock_create_ruleset, libc::ENOSYS),
+            LANDLOCK_REFUSED => fail_with(libc::SYS_landlock_restrict_self, libc::EPERM),
+            NO_CLONE3 => fail_with(libc::SYS_clone3, libc::ENOSYS),
+            _ => assert_eq!(setup, CONFINED),
+        }
+    }
+
+    extern "C" fn handled(_: libc::c_int) {}
+
+    fn stand_in(setup: &str) -> ! {
+        // A handler to return from, installed as a C library installs its own.
+        // SAFETY: `handled` does nothing, which is safe in a signal handler.
+        unsafe {
+            libc::signal(
+                libc::SIGUSR1,
+                handled as extern "C" fn(libc::c_int) as usize,
+            )
+        };
+        let layers = if setup == UNCONFINED {
             "unconfined".into()
         } else {
-            // A host that lacks or refuses part of the worker sandbox, stood
-            // in for by a filter of the test's own that answers for the kernel.
-            match host {
-                NO_LANDLOCK => answer(libc::SYS_landlock_create_ruleset, libc::ENOSYS),
-                LANDLOCK_REFUSED => answer(libc::SYS_landlock_restrict_self, libc::EPERM),
-                _ => assert_eq!(host, CONFINED),
-            }
+            host_quirk(setup);
             match confine() {
                 Ok(layers) => layers.to_string(),
                 Err(error) => {
@@ -116,7 +141,7 @@ mod linux {
 
     /// Make one system call fail with `errno` from now on, as a kernel without
     /// it, or a host that refuses it, would.
-    fn answer(nr: libc::c_long, errno: i32) {
+    fn fail_with(nr: libc::c_long, errno: i32) {
         let op = |code: u32, k: u32, jt, jf| libc::sock_filter {
             code: code as u16,
             jt,
@@ -172,6 +197,9 @@ mod linux {
                 "read-memory" => read_memory(number(1) as libc::pid_t, number(2)),
                 "signal" => signal(number(1) as libc::pid_t, number(2) as libc::c_int),
                 "trace-me" => trace_me(),
+                "raise" => raise(number(1) as libc::c_int),
+                "fork" => fork(),
+                "signal-on-io" => signal_on_io(number(1) as libc::pid_t),
                 #[cfg(target_arch = "x86_64")]
                 "x32" => x32(),
                 #[cfg(target_arch = "x86_64")]
@@ -190,7 +218,7 @@ mod linux {
         std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
     }
 
-    fn done(result: impl Into<i64>) -> Result<(), i32> {
+    fn checked(result: impl Into<i64>) -> Result<(), i32> {
         if result.into() < 0 {
             Err(errno())
         } else {
@@ -201,7 +229,7 @@ mod linux {
     fn open(path: &str) -> Result<(), i32> {
         let path = CString::new(path).unwrap();
         // SAFETY: `path` is a NUL-terminated string that outlives the call.
-        done(unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) })
+        checked(unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) })
     }
 
     fn loopback(port: u16) -> libc::sockaddr_in {
@@ -220,8 +248,8 @@ mod linux {
         // SAFETY: `address` outlives the calls and its size is passed with it.
         unsafe {
             let socket = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
-            done(socket)?;
-            done(libc::connect(
+            checked(socket)?;
+            checked(libc::connect(
                 socket,
                 (&raw const address).cast(),
                 size_of::<libc::sockaddr_in>() as _,
@@ -234,8 +262,8 @@ mod linux {
         // SAFETY: the buffer and `address` outlive the calls, with their sizes.
         unsafe {
             let socket = libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0);
-            done(socket)?;
-            done(libc::sendto(
+            checked(socket)?;
+            checked(libc::sendto(
                 socket,
                 b"x".as_ptr().cast(),
                 1,
@@ -252,7 +280,7 @@ mod linux {
         let path = CString::new("/bin/true").unwrap();
         let argv = [path.as_ptr(), std::ptr::null()];
         // SAFETY: `argv` is a NULL-terminated array of NUL-terminated strings.
-        done(unsafe { libc::execv(path.as_ptr(), argv.as_ptr()) })
+        checked(unsafe { libc::execv(path.as_ptr(), argv.as_ptr()) })
     }
 
     fn read_memory(pid: libc::pid_t, address: usize) -> Result<(), i32> {
@@ -266,25 +294,49 @@ mod linux {
             iov_len: buffer.len(),
         };
         // SAFETY: `local` points at `buffer`; the kernel validates `remote`.
-        done(unsafe { libc::process_vm_readv(pid, &local, 1, &remote, 1, 0) } as i64)
+        checked(unsafe { libc::process_vm_readv(pid, &local, 1, &remote, 1, 0) } as i64)
     }
 
     fn signal(pid: libc::pid_t, signal: libc::c_int) -> Result<(), i32> {
         // SAFETY: kill takes two integers.
-        done(unsafe { libc::kill(pid, signal) })
+        checked(unsafe { libc::kill(pid, signal) })
+    }
+
+    /// Signal this thread. The signal is handled, and its handler returned
+    /// from, before `raise` returns.
+    fn raise(signal: libc::c_int) -> Result<(), i32> {
+        // SAFETY: raise takes one integer.
+        checked(unsafe { libc::raise(signal) })
+    }
+
+    /// A second process, which ends at once.
+    fn fork() -> Result<(), i32> {
+        // SAFETY: the new process calls only `_exit`, which is async-signal-safe.
+        let pid = unsafe { libc::fork() };
+        if pid == 0 {
+            unsafe { libc::_exit(0) };
+        }
+        checked(pid)
+    }
+
+    /// Ask the kernel to signal `pid` whenever the control socket has input:
+    /// a signal to another process that `kill` never sends.
+    fn signal_on_io(pid: libc::pid_t) -> Result<(), i32> {
+        // SAFETY: F_SETOWN takes one integer.
+        checked(unsafe { libc::fcntl(0, libc::F_SETOWN, pid) })
     }
 
     /// A system call no grant worker needs.
     fn trace_me() -> Result<(), i32> {
         // SAFETY: PTRACE_TRACEME takes no pointers.
-        done(unsafe { libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0) })
+        checked(unsafe { libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0) })
     }
 
     /// `getpid` by its x32 number: x86-64's architecture value, another table.
     #[cfg(target_arch = "x86_64")]
     fn x32() -> Result<(), i32> {
         // SAFETY: getpid takes no arguments.
-        done(unsafe { libc::syscall(0x4000_0000 | libc::SYS_getpid) })
+        checked(unsafe { libc::syscall(0x4000_0000 | libc::SYS_getpid) })
     }
 
     /// `getpid` by its i386 number, through the 32-bit entry point.
@@ -300,7 +352,7 @@ mod linux {
     // ---------- the supervisor's side ----------
 
     struct StandIn {
-        child: Child,
+        process: Reaped,
         pid: libc::pid_t,
         secret: usize,
         layers: String,
@@ -331,11 +383,11 @@ mod linux {
         /// Start a stand-in the way the supervisor starts a grant worker: a
         /// fresh process, a cleared environment, the control socket as its
         /// standard input, and its stream handed over by `SCM_RIGHTS`.
-        fn start(host: &str) -> Self {
+        fn start(setup: &str) -> Self {
             let (control, child_control) = UnixDatagram::pair().unwrap();
-            let child = Command::new(std::env::current_exe().unwrap())
+            let process = Command::new(std::env::current_exe().unwrap())
                 .env_clear()
-                .args(["stand-in", host])
+                .args(["stand-in", setup])
                 .stdin(Stdio::from(OwnedFd::from(child_control)))
                 .stdout(Stdio::null())
                 .spawn()
@@ -356,7 +408,7 @@ mod linux {
             let words: Vec<&str> = ready.trim_end().splitn(4, ' ').collect();
             assert_eq!(words[0], "ready", "the stand-in never served its stream");
             StandIn {
-                child,
+                process: Reaped(process),
                 pid: words[1].parse().unwrap(),
                 secret: words[2].parse().unwrap(),
                 layers: words[3].to_owned(),
@@ -374,7 +426,7 @@ mod linux {
                 _ if reply.trim_end() == "ok" => Outcome::GotThrough,
                 Some(("errno", errno)) => Outcome::Errno(errno.parse().unwrap()),
                 _ => {
-                    let status = self.child.wait().unwrap();
+                    let status = self.process.0.wait().unwrap();
                     match status.signal() {
                         Some(signal) => Outcome::Killed(signal),
                         // Only a successful exec ends a stand-in cleanly.
@@ -388,19 +440,60 @@ mod linux {
         }
     }
 
-    impl Drop for StandIn {
-        fn drop(&mut self) {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-    }
-
-    struct KillOnDrop<'a>(&'a mut Child);
-    impl Drop for KillOnDrop<'_> {
+    /// A process of the test's, stopped and reaped when the test lets go of it.
+    struct Reaped(Child);
+    impl Drop for Reaped {
         fn drop(&mut self) {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+    }
+
+    /// The Gateway's own grant worker, started as the supervisor starts it,
+    /// less bubblewrap, and optionally on a host with a quirk.
+    fn grant_worker(setup: Option<&str>) -> (Reaped, UnixDatagram) {
+        let gateway = env!("CARGO_BIN_EXE_countersign-gateway");
+        let (control, worker_control) = UnixDatagram::pair().unwrap();
+        control
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut command = match setup {
+            None => Command::new(gateway),
+            Some(setup) => {
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command.args(["stand-in", setup, gateway]);
+                command
+            }
+        };
+        let worker = command
+            .env_clear()
+            .arg("grant-worker")
+            .stdin(Stdio::from(OwnedFd::from(worker_control)))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        (Reaped(worker), control)
+    }
+
+    /// Asked as the startup probe asks, a grant worker reports its Landlock
+    /// layer in one byte and exits cleanly.
+    fn probe(worker: &mut Reaped, control: &UnixDatagram) {
+        control.send(&[0]).unwrap();
+        let mut report = [0u8; 2];
+        let received = control.recv(&mut report);
+        let status = worker.0.wait().unwrap();
+        assert!(
+            status.success(),
+            "the probed grant worker ended with {status}"
+        );
+        assert_eq!(received.unwrap(), 1);
+    }
+
+    /// Yama's scope 2 and 3 refuse every unprivileged memory read, opt-out or
+    /// not, so there the unconfined reads cannot be shown to get through.
+    fn memory_reads_are_possible() -> bool {
+        std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
+            .is_ok_and(|scope| matches!(scope.trim(), "0" | "1"))
     }
 
     /// What the attempt is aimed at, when it needs a process to aim at.
@@ -415,13 +508,13 @@ mod linux {
     /// pair, while the other stand-in is alive to be its target. The other
     /// stand-in must be unharmed afterwards.
     fn each_of_two(
-        host: &str,
+        setup: &str,
         command: impl Fn(&Target) -> String,
         expect: impl Fn(&Outcome) -> bool,
         expectation: &str,
     ) {
         for attacker in 0..2 {
-            let mut pair = [StandIn::start(host), StandIn::start(host)];
+            let mut pair = [StandIn::start(setup), StandIn::start(setup)];
             let other = &pair[1 - attacker];
             let command = command(&Target {
                 supervisor_pid: std::process::id(),
@@ -484,11 +577,7 @@ mod linux {
             );
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
-            for command in [
-                "open /etc/hostname".to_owned(),
-                format!("tcp {port}"),
-                "exec".into(),
-            ] {
+            for command in ["open /".to_owned(), format!("tcp {port}"), "exec".into()] {
                 each_of_two(
                     NO_LANDLOCK,
                     |_| command.clone(),
@@ -520,20 +609,25 @@ mod linux {
             );
         }),
         ("opening_a_file_is_refused", || {
-            refused_only_when_confined(|_| "open /etc/hostname".into());
+            refused_only_when_confined(|_| "open /".into());
         }),
         ("reading_the_supervisors_environment_is_refused", || {
             refused_only_when_confined(|t| format!("open /proc/{}/environ", t.supervisor_pid));
         }),
         ("reading_the_supervisors_memory_is_refused", || {
-            refused_only_when_confined(|t| {
-                format!("read-memory {} {}", t.supervisor_pid, t.supervisor_secret)
-            });
+            let read =
+                |t: &Target| format!("read-memory {} {}", t.supervisor_pid, t.supervisor_secret);
+            if memory_reads_are_possible() {
+                each_of_two(UNCONFINED, read, |o| *o == Outcome::GotThrough, "success");
+            }
+            refused(read);
         }),
         ("reading_the_other_grant_workers_memory_is_refused", || {
-            refused_only_when_confined(|t| {
-                format!("read-memory {} {}", t.other_pid, t.other_secret)
-            });
+            let read = |t: &Target| format!("read-memory {} {}", t.other_pid, t.other_secret);
+            if memory_reads_are_possible() {
+                each_of_two(UNCONFINED, read, |o| *o == Outcome::GotThrough, "success");
+            }
+            refused(read);
         }),
         (
             "an_unconfined_process_cannot_read_a_grant_workers_memory",
@@ -550,42 +644,59 @@ mod linux {
         (
             "the_grant_worker_is_confined_before_it_is_sent_anything",
             || {
-                // The Gateway's own grant worker, started as the supervisor starts
-                // it, less bubblewrap. Nothing has been sent to it yet.
-                let (control, child_control) = UnixDatagram::pair().unwrap();
-                let mut worker = Command::new(env!("CARGO_BIN_EXE_countersign-gateway"))
-                    .env_clear()
-                    .arg("grant-worker")
-                    .stdin(Stdio::from(OwnedFd::from(child_control)))
-                    .stdout(Stdio::null())
-                    .spawn()
-                    .unwrap();
-                let status = format!("/proc/{}/status", worker.id());
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-                let confined = loop {
-                    let status = std::fs::read_to_string(&status).unwrap();
-                    let field = |name: &str| {
-                        let line = status.lines().find(|line| line.starts_with(name));
-                        line.and_then(|line| line.split_whitespace().nth(1).map(str::to_owned))
-                    };
-                    // 2 is filter mode.
-                    if field("Seccomp:").as_deref() == Some("2") {
-                        break field("NoNewPrivs:").as_deref() == Some("1");
-                    }
-                    if std::time::Instant::now() > deadline {
-                        break false;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                let (mut worker, control) = grant_worker(None);
+                // A container's own filter may already cover both processes, so
+                // the grant worker's is the one more than this test runs under.
+                let filters = |pid: u32| {
+                    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+                    let line = status
+                        .lines()
+                        .find(|line| line.starts_with("Seccomp_filters:"));
+                    line.and_then(|line| line.split_whitespace().nth(1)?.parse::<u32>().ok())
+                        .expect("a kernel that counts seccomp filters (5.9)")
                 };
-                let _guard = KillOnDrop(&mut worker);
+                let inherited = filters(std::process::id());
+                let deadline = Instant::now() + Duration::from_secs(5);
+                // Nothing has been sent to it yet.
+                let mut confined = false;
+                while !confined && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                    confined = filters(worker.0.id()) == inherited + 1;
+                }
                 assert!(confined, "the grant worker waited for input unconfined");
-                // Asked as the startup probe asks, it reports its Landlock layer and exits.
-                control.send(&[0]).unwrap();
-                let mut report = [0u8; 2];
-                assert_eq!(control.recv(&mut report).unwrap(), 1);
-                assert!(_guard.0.wait().unwrap().success());
+                probe(&mut worker, &control);
             },
         ),
+        ("the_grant_worker_starts_on_a_host_without_clone3", || {
+            let (mut worker, control) = grant_worker(Some(NO_CLONE3));
+            probe(&mut worker, &control);
+        }),
+        ("its_threads_work_on_a_host_without_clone3", || {
+            each_of_two(
+                NO_CLONE3,
+                |_| "ping".into(),
+                |o| *o == Outcome::GotThrough,
+                "a reply",
+            );
+        }),
+        ("starting_another_process_is_refused", || {
+            refused_only_when_confined(|_| "fork".into());
+            each_of_two(NO_CLONE3, |_| "fork".into(), Outcome::refused, "a refusal");
+        }),
+        (
+            "having_the_kernel_signal_another_process_is_refused",
+            || {
+                refused_only_when_confined(|t| format!("signal-on-io {}", t.other_pid));
+            },
+        ),
+        ("returning_from_a_signal_handler_works", || {
+            for worker in 0..2 {
+                let mut pair = [StandIn::start(CONFINED), StandIn::start(CONFINED)];
+                let handled = format!("raise {}", libc::SIGUSR1);
+                assert_eq!(pair[worker].attempt(&handled), Outcome::GotThrough);
+                assert_eq!(pair[worker].attempt("ping"), Outcome::GotThrough);
+            }
+        }),
         ("a_tcp_connection_is_refused", || {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -641,12 +752,12 @@ mod linux {
         }),
         #[cfg(target_arch = "x86_64")]
         ("a_system_call_from_a_foreign_architecture_kills_it", || {
-            each_of_two(
-                UNCONFINED,
-                |_| "i386".into(),
-                |o| *o == Outcome::GotThrough,
-                "success",
-            );
+            // A kernel without the 32-bit entry point answers it with SIGSEGV,
+            // and has no foreign architecture to call by.
+            if StandIn::start(UNCONFINED).attempt("i386") == Outcome::Killed(libc::SIGSEGV) {
+                println!("     this kernel has no i386 entry point: nothing to refuse");
+                return;
+            }
             each_of_two(
                 CONFINED,
                 |_| "i386".into(),

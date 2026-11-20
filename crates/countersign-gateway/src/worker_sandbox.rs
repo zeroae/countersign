@@ -35,7 +35,6 @@ impl fmt::Display for Layers {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layer {
     NonDumpable,
-    NoNewPrivs,
     Landlock,
     AllowList,
 }
@@ -44,7 +43,6 @@ impl fmt::Display for Layer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Layer::NonDumpable => "non-dumpable",
-            Layer::NoNewPrivs => "no_new_privs",
             Layer::Landlock => "Landlock",
             Layer::AllowList => "seccomp allow-list",
         })
@@ -70,9 +68,12 @@ pub struct ConfineError {
 pub fn confine() -> Result<Layers, ConfineError> {
     let at = |layer| move |source| ConfineError { layer, source };
     prctl(libc::PR_SET_DUMPABLE, 0).map_err(at(Layer::NonDumpable))?;
-    // Ahead of Landlock, not after it: an unprivileged landlock_restrict_self
-    // fails with EPERM unless no_new_privs is set (landlock_restrict_self(2)).
-    prctl(libc::PR_SET_NO_NEW_PRIVS, 1).map_err(at(Layer::NoNewPrivs))?;
+    // The allow-list's no_new_privs, set ahead of Landlock and not after it:
+    // an unprivileged landlock_restrict_self fails with EPERM without it
+    // (landlock_restrict_self(2)).
+    prctl(libc::PR_SET_NO_NEW_PRIVS, 1)
+        .map_err(|error| io::Error::new(error.kind(), format!("no_new_privs: {error}")))
+        .map_err(at(Layer::AllowList))?;
     let landlock = landlock().map_err(at(Layer::Landlock))?;
     allow_list().map_err(at(Layer::AllowList))?;
     Ok(Layers { landlock })
@@ -169,7 +170,6 @@ const ALLOWED: &[libc::c_long] = &[
     libc::SYS_close,
     libc::SYS_shutdown,
     libc::SYS_setsockopt,
-    libc::SYS_fcntl,
     libc::SYS_epoll_create1,
     libc::SYS_epoll_ctl,
     libc::SYS_epoll_pwait,
@@ -185,6 +185,9 @@ const ALLOWED: &[libc::c_long] = &[
     libc::SYS_rt_sigprocmask,
     // The C library installs its thread-cancellation handler with the first thread.
     libc::SYS_rt_sigaction,
+    // Returning from a signal handler. Without it a crash that a handler
+    // sees first would end as a filter kill, and be logged as one.
+    libc::SYS_rt_sigreturn,
     libc::SYS_sched_yield,
     // A new thread asks the C library for its own attributes, CPU set included.
     libc::SYS_sched_getaffinity,
@@ -213,10 +216,19 @@ const DATA_ARG0: u32 = 16;
 const DATA_ARG1: u32 = 24;
 const DATA_ARG4: u32 = 48;
 
+/// What one word of a system call's arguments has to be.
+enum Test<'a> {
+    /// One of these values.
+    OneOf(&'a [u32]),
+    /// Any value with this bit set.
+    Bit(u32),
+}
+
 /// The seccomp filter. A system call outside it kills the whole process.
 fn allow_list() -> io::Result<()> {
     const LOAD: u16 = (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16;
     const EQUAL: u16 = (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16;
+    const BIT_SET: u16 = (libc::BPF_JMP | libc::BPF_JSET | libc::BPF_K) as u16;
     const RETURN: u16 = (libc::BPF_RET | libc::BPF_K) as u16;
     let op = |code, k, jt, jf| libc::sock_filter { code, jt, jf, k };
     let allow = op(RETURN, libc::SECCOMP_RET_ALLOW, 0, 0);
@@ -244,30 +256,75 @@ fn allow_list() -> io::Result<()> {
     for nr in ALLOWED {
         filter.extend([op(EQUAL, number(*nr), 0, 1), allow]);
     }
-    // These are allowed only when each listed word of their arguments has the
-    // listed value. The kernel reads the first three arguments below as
-    // 32-bit integers, so the low word is the whole argument.
-    let pid = std::process::id();
-    let conditional: [(libc::c_long, &[(u32, u32)]); 5] = [
+    // These are allowed only when every listed word of their arguments passes
+    // its test. The kernel reads each argument tested below as a 32-bit
+    // integer, bar the pointer, so the low word is the whole argument.
+    let own_pid = [std::process::id()];
+    let conditional: [(libc::c_long, &[(u32, Test)]); 7] = [
         // A grant worker may signal only itself (ADR 0001, decision 6).
-        (libc::SYS_kill, &[(DATA_ARG0, pid)]),
-        (libc::SYS_tgkill, &[(DATA_ARG0, pid)]),
+        (libc::SYS_kill, &[(DATA_ARG0, Test::OneOf(&own_pid))]),
+        (libc::SYS_tgkill, &[(DATA_ARG0, Test::OneOf(&own_pid))]),
+        // Duplicating a stream's descriptor and reading its flags. Not
+        // F_SETOWN, which has the kernel signal a process of the caller's choice.
+        (
+            libc::SYS_fcntl,
+            &[(
+                DATA_ARG1,
+                Test::OneOf(&[
+                    libc::F_DUPFD_CLOEXEC as u32,
+                    libc::F_GETFD as u32,
+                    libc::F_GETFL as u32,
+                ]),
+            )],
+        ),
+        // A thread, where the host has no clone3: Docker's default profile
+        // answers clone3 with ENOSYS, and the C library falls back to clone.
+        // Unlike clone3's, clone's flags are an argument the filter can read.
+        (
+            libc::SYS_clone,
+            &[(DATA_ARG0, Test::Bit(libc::CLONE_THREAD as u32))],
+        ),
         // The async runtime wakes itself over a local socket pair, which
         // reaches nothing outside the grant worker.
-        (libc::SYS_socketpair, &[(DATA_ARG0, libc::AF_UNIX as u32)]),
+        (
+            libc::SYS_socketpair,
+            &[(DATA_ARG0, Test::OneOf(&[libc::AF_UNIX as u32]))],
+        ),
         // Switching a received stream between blocking and non-blocking.
-        (libc::SYS_ioctl, &[(DATA_ARG1, libc::FIONBIO as u32)]),
+        (
+            libc::SYS_ioctl,
+            &[(DATA_ARG1, Test::OneOf(&[libc::FIONBIO as u32]))],
+        ),
         // Writing a stream. A null destination, both words of the pointer:
         // with one, a datagram socket could reach a socket it was not given.
-        (libc::SYS_sendto, &[(DATA_ARG4, 0), (DATA_ARG4 + 4, 0)]),
+        (
+            libc::SYS_sendto,
+            &[
+                (DATA_ARG4, Test::OneOf(&[0])),
+                (DATA_ARG4 + 4, Test::OneOf(&[0])),
+            ],
+        ),
     ];
-    for (nr, words) in conditional {
-        // Past this system call's block: a kill ends it, so nothing falls through.
-        filter.push(op(EQUAL, number(nr), 0, 3 * words.len() as u8 + 1));
-        for (word, value) in words {
-            filter.extend([op(LOAD, *word, 0, 0), op(EQUAL, *value, 1, 0), kill]);
+    for (nr, tests) in conditional {
+        let mut block = Vec::new();
+        for (word, test) in tests {
+            block.push(op(LOAD, *word, 0, 0));
+            match test {
+                Test::OneOf(values) => {
+                    // A match jumps past the values left to try and the kill.
+                    for (tried, value) in values.iter().enumerate() {
+                        block.push(op(EQUAL, *value, (values.len() - tried) as u8, 0));
+                    }
+                }
+                Test::Bit(bit) => block.push(op(BIT_SET, *bit, 1, 0)),
+            }
+            block.push(kill);
         }
-        filter.push(allow);
+        block.push(allow);
+        // Another system call skips the block. Inside it every path ends in
+        // the kill or the allow, so nothing falls through to the next one.
+        filter.push(op(EQUAL, number(nr), 0, block.len() as u8));
+        filter.extend(block);
     }
     filter.push(kill);
 

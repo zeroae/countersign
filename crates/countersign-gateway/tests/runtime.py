@@ -274,7 +274,7 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 leaves = [pid for pid in descendants(child.pid) if not descendants(pid)]
                 assert len(leaves) == 1, leaves
                 os.kill(leaves[0], signal.SIGSYS)
-                assert wait_for_log(r"Gateway grant worker killed by the worker sandbox's filter \(SIGSYS\); "
+                assert wait_for_log(r"Gateway grant alice: grant worker killed by the worker sandbox's filter \(SIGSYS\); "
                                     r'grant fenced'), log
                 assert request('alice').returncode != 0, 'A grant whose worker the filter killed was served again'
                 assert request('bob').returncode == 0, "Alice's killed grant worker affected Bob"

@@ -27,7 +27,7 @@ use std::{
     process::{Command, ExitStatus, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -141,9 +141,25 @@ pub fn killed_by_filter(status: ExitStatus) -> bool {
     status.signal() == Some(sigsys) || status.code() == Some(128 + sigsys)
 }
 
+/// The startup probe's report of a grant worker's layers, in one byte: the
+/// Landlock ABI, or 0 for none.
+fn report(layers: Layers) -> [u8; 1] {
+    match layers.landlock {
+        Landlock::Unavailable => [0],
+        Landlock::Abi(abi) => [abi],
+    }
+}
+fn reported(report: [u8; 1]) -> Layers {
+    Layers {
+        landlock: match report {
+            [0] => Landlock::Unavailable,
+            [abi] => Landlock::Abi(abi),
+        },
+    }
+}
+
 pub struct ChildHandle {
     control: UnixDatagram,
-    exited: Arc<AtomicBool>,
     /// Dropping this stops the grant worker.
     _stop: tokio::sync::oneshot::Sender<()>,
 }
@@ -151,39 +167,35 @@ impl ChildHandle {
     fn start(stderr: Stdio) -> Result<(tokio::process::Child, UnixDatagram)> {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
-        let child = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
+        let process = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
             .kill_on_drop(true)
             .arg("grant-worker")
             .stdin(Stdio::from(OwnedFd::from(child_control)))
             .stdout(Stdio::null())
             .stderr(stderr)
             .spawn()?;
-        Ok((child, control))
+        Ok((process, control))
     }
 
     pub fn launch() -> Result<(Self, Exit)> {
-        let (mut child, control) = Self::start(Stdio::null())?;
-        let exited = Arc::new(AtomicBool::new(false));
+        let (mut process, control) = Self::start(Stdio::null())?;
         let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
         let (report, exit) = tokio::sync::oneshot::channel();
-        let flag = exited.clone();
         tokio::spawn(async move {
             tokio::select! {
-                status = child.wait() => {
-                    flag.store(true, Ordering::Release);
+                status = process.wait() => {
                     if let Ok(status) = status {
                         let _ = report.send(status);
                     }
                 }
                 _ = &mut stopped => {
-                    let _ = child.kill().await;
+                    let _ = process.kill().await;
                 }
             }
         });
         Ok((
             Self {
                 control,
-                exited,
                 _stop: stop,
             },
             exit,
@@ -194,10 +206,10 @@ impl ChildHandle {
     /// This short-lived worker receives no grant, credentials or traffic. It
     /// confines itself as every grant worker does and reports its layers.
     pub async fn verify_environment() -> Result<Layers> {
-        let (child, control) = Self::start(Stdio::piped())?;
+        let (process, control) = Self::start(Stdio::piped())?;
         control.send(&[0])?;
         let output =
-            tokio::time::timeout(Duration::from_secs(5), child.wait_with_output()).await??;
+            tokio::time::timeout(Duration::from_secs(5), process.wait_with_output()).await??;
         if !output.status.success() {
             let hint: String = String::from_utf8_lossy(&output.stderr)
                 .split_whitespace()
@@ -213,22 +225,14 @@ impl ChildHandle {
             .into());
         }
         // The report was queued before the probe exited.
-        let mut report = [0u8; 2];
-        match control.recv(&mut report) {
-            Ok(1) => Ok(Layers {
-                landlock: match report[0] {
-                    0 => Landlock::Unavailable,
-                    abi => Landlock::Abi(abi),
-                },
-            }),
+        let mut message = [0u8; 2];
+        match control.recv(&mut message) {
+            Ok(1) => Ok(reported([message[0]])),
             _ => Err(invalid("grant worker reported no worker sandbox layers")),
         }
     }
 
     pub fn attach(&mut self) -> Result<[tokio::net::UnixStream; 3]> {
-        if self.exited.load(Ordering::Acquire) {
-            return Err(invalid("grant worker exited"));
-        }
         let (a, b) = UnixStream::pair()?;
         let (c, d) = UnixStream::pair()?;
         let (e, f) = UnixStream::pair()?;
@@ -275,13 +279,18 @@ pub fn serve(layers: Layers) -> Result<()> {
             return Err(invalid("invalid worker dispatch"));
         }
         if byte == [0] && received.is_empty() {
-            // The startup probe: report the layers this grant worker runs under.
-            let report = match layers.landlock {
-                Landlock::Unavailable => 0,
-                Landlock::Abi(abi) => abi,
-            };
-            nix::unistd::write(std::io::stdin(), &[report])?;
-            return Ok(());
+            // The startup probe. It reports this grant worker's layers from
+            // where a connection is served, a thread with an async runtime, so
+            // a host that the allow-list cannot serve on fails at startup.
+            return std::thread::spawn(move || -> Result<()> {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                nix::unistd::write(std::io::stdin(), &report(layers))?;
+                Ok(())
+            })
+            .join()
+            .map_err(|_| invalid("worker sandbox probe panicked"))?;
         }
         if byte != [1] {
             return Err(invalid("invalid worker control command"));

@@ -185,12 +185,13 @@ impl Gateway {
     async fn watch_worker(self: Arc<Self>, grant: GrantBinding, exit: worker::Exit) {
         // An error means the supervisor stopped the grant worker itself.
         if let Ok(status) = exit.await {
+            let id = grant.grant.as_str();
             if worker::killed_by_filter(status) {
                 eprintln!(
-                    "Gateway grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced"
+                    "Gateway grant {id}: grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced"
                 );
             } else {
-                eprintln!("Gateway grant worker ended ({status}); grant fenced");
+                eprintln!("Gateway grant {id}: grant worker ended ({status}); grant fenced");
             }
             self.fence(&grant);
         }
