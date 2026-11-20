@@ -162,6 +162,13 @@ async function portal(browser, colorScheme, api) {
   return page;
 }
 
+// An approved status as the Broker returns it: the grant's deadline and the
+// certificate the user approved.
+const approvedStatus = () => ({ id: approvalId, state: 'approved', ready: true, upstream_mtls_accepted: true,
+  ingress_closed_count: 0, egress_closed_count: 0, expires_at_ms: NOW.getTime() + 3570000,
+  certificate: { sha256: fingerprints.selected, subject: 'CN=Demo user', issuer: 'CN=Countersign demo client-ca',
+    not_after_ms: Date.parse('2026-11-19T18:39:30-05:00') } });
+
 function demoApi(extra = {}) {
   return {
     session: () => ({ csrf: 'fixture', vapid: null, ...job }),
@@ -342,18 +349,15 @@ const portalShots = {
     } });
   },
   async 'access-active'(browser, scheme, name) {
-    const page = await portal(browser, scheme, demoApi({
-      status: () => ({ id: approvalId, state: 'approved', ready: true, upstream_mtls_accepted: true,
-        ingress_closed_count: 0, egress_closed_count: 0 }),
-    }));
+    const page = await portal(browser, scheme, demoApi({ status: approvedStatus }));
     await page.goto(PORTAL + '/#countersign=' + approvalId);
     await page.getByRole('heading', { name: 'Access approved' }).waitFor();
-    await capture(page, name, { clip: content, selectors: { progress: '.progress li' } });
+    await page.locator('#access-ends').getByText('59:30 left').waitFor();
+    await capture(page, name, { clip: content, selectors: { progress: '.progress li', ends: '#access-ends-row' } });
   },
   async 'access-ended'(browser, scheme, name) {
     const page = await portal(browser, scheme, demoApi({
-      status: () => ({ id: approvalId, state: 'approved', ready: true, upstream_mtls_accepted: true,
-        ingress_closed_count: 0, egress_closed_count: 0 }),
+      status: approvedStatus,
       revoke: () => null,
     }));
     await page.goto(PORTAL + '/#countersign=' + approvalId);
@@ -363,12 +367,11 @@ const portalShots = {
   },
   async 'job-result'(browser, scheme, name) {
     const page = await portal(browser, scheme, demoApi({
+      status: approvedStatus,
       job: () => ({ result: { url: 'https://ledger.partner.example/statements/latest', ok: true, http_status: 200,
         fingerprint: fingerprints.selected, subject: 'Demo user', error: null } }),
     }));
-    await page.goto(PORTAL + '/job');
-    await page.getByLabel('SHA-256 you selected in the Companion').fill(fingerprints.selected);
-    await page.getByRole('button', { name: 'Compare' }).click();
+    await page.goto(PORTAL + '/job#countersign=' + approvalId);
     await page.locator('#match').waitFor();
     await capture(page, name, { clip: content, selectors: { compare: '.pair-cards', match: '#match' } });
   },

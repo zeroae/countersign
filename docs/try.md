@@ -43,9 +43,9 @@ Read **Integrator**, **Account**, **Context**, **Requested host** and **Approval
 {"fingerprint":"c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b","subject":"Demo user"}
 ```
 
-Each launch creates fresh certificates. Compare the response to the fingerprint you selected in **your** run. Matching subject names alone cannot identify the key that signed the handshake. The launcher also hands the result to the Integrator: open **Job result** on the demo page, paste the SHA-256 from the approval in your Companion and choose **Compare**.
+Each launch creates fresh certificates. Compare the response to the fingerprint you selected in **your** run. Matching subject names alone cannot identify the key that signed the handshake. The launcher also hands the result to the Integrator: open **Job result** on the demo page. It compares the fingerprint the site received with the certificate you approved, which the Integrator reads from the Broker's approval status.
 
-![Harbor Ledger's job result page showing the fingerprint the site received and a confirmation that it matches the pasted SHA-256 of the approved certificate.](assets/screenshots/job-result.png#gh-light-mode-only)![Harbor Ledger's job result page showing the fingerprint the site received and a confirmation that it matches the pasted SHA-256 of the approved certificate.](assets/screenshots/job-result-dark.png#gh-dark-mode-only)
+![Harbor Ledger's job result page showing the fingerprint the site received and the certificate approved in the Companion, and a confirmation that the two SHA-256 fingerprints match.](assets/screenshots/job-result.png#gh-light-mode-only)![Harbor Ledger's job result page showing the fingerprint the site received and the certificate approved in the Companion, and a confirmation that the two SHA-256 fingerprints match.](assets/screenshots/job-result-dark.png#gh-dark-mode-only)
 
 ## End access
 

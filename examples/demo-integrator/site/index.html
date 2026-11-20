@@ -97,6 +97,7 @@
       <dl class="facts">
         <div><dt>Requested host</dt><dd class="mono" data-host></dd></div>
         <div><dt>Approval ID</dt><dd class="mono" data-approval></dd></div>
+        <div id="access-ends-row" hidden><dt>Access ends</dt><dd id="access-ends"></dd></div>
       </dl>
       <p class="muted">Your Companion shows the certificate, its SHA-256 fingerprint and when this approval ends.</p>
       <div class="actions">
@@ -150,14 +151,15 @@
           <span class="fp" id="job-fingerprint"></span>
           <span class="muted small" id="job-subject"></span>
         </div>
-        <form class="peer" id="compare">
-          <label class="muted small" for="selected">SHA-256 you selected in the Companion</label>
-          <textarea id="selected" name="selected" class="fp-input" rows="2" autocomplete="off" spellcheck="false" placeholder="Paste from the approval in your Companion"></textarea>
-          <button class="btn ghost small-btn">Compare</button>
-        </form>
+        <div class="peer">
+          <span class="muted small">Certificate you approved in the Companion</span>
+          <span class="fp" id="job-approved"></span>
+          <span class="muted small" id="job-approved-subject"></span>
+        </div>
       </div>
       <p class="verdict good" role="status" id="match" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Fingerprints match — the site saw the key you approved</p>
       <p class="verdict bad" role="status" id="mismatch" hidden>These fingerprints differ. The site did not see the certificate you selected.</p>
+      <p class="muted" role="status" id="no-compare" hidden>This approval has no approved certificate to compare yet. Open it from the access page once you have approved it.</p>
       <p class="fine">Matching subject names alone can’t identify the key. Compare the full SHA-256 fingerprint.</p>
     </div>
     <div class="actions">

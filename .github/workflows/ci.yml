@@ -25,6 +25,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # The demo Integrator's page test drives its site in Playwright's Chromium.
+      - run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: pnpm test
       - run: rustup show
       - name: Pre-commit hook tests
