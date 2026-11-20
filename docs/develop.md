@@ -27,6 +27,46 @@ pnpm test
 
 For the graphics and network path, run the [demo walkthrough](try.md) with `--verify` to automate the installed Companion and browser. The hosted end-to-end job also runs a separate harness that selects identities from candidate lists of different sizes, verifies the peer fingerprint and checks revocation. The native qualification jobs generate identities in disposable provider stores. On macOS and Windows use a disposable runner account for that harness because it changes user-level keychain or certificate-store state. [End-to-end workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/e2e.yml) · [Native qualification workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/native.yml)
 
+## A grant worker died of SIGSYS
+
+A grant worker that makes a system call outside the worker sandbox's allow-list is killed by the kernel with `SIGSYS`. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
+
+The kernel writes an audit line for each filter kill. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
+
+```sh
+journalctl -k | grep type=1326
+```
+
+```text
+kernel: audit: type=1326 audit(1795144504.852:6342): ... pid=2188053 comm="worker_sandbox-" exe="..." sig=31 arch=c00000b7 syscall=56 compat=0 ip=0xec5e8e3f07c4 code=0x80000000
+```
+
+`sig=31` is `SIGSYS`, `syscall=` is the number of the call and `arch=` the architecture that number belongs to: `c000003e` is x86-64 and `c00000b7` is arm64. In CI the same lines come from `sudo dmesg`, which the CI and end-to-end workflows print when a run fails, in the step "Name the system call when the worker sandbox's filter killed a grant worker".
+
+When the number is not enough, trace the Gateway. The runtime test takes the Gateway executable as its argument, so give it a wrapper that starts the real one under `strace`:
+
+```sh
+cat > /tmp/traced-gateway <<'EOF'
+#!/bin/sh
+exec strace -D -f -o "/tmp/gateway-trace.$$" "$PWD/target/debug/countersign-gateway" "$@"
+EOF
+chmod +x /tmp/traced-gateway
+python crates/countersign-gateway/tests/runtime.py /tmp/traced-gateway
+```
+
+The wrapper runs `strace -D -f -o <file> target/debug/countersign-gateway serve <config>` for each Gateway the test starts, one trace file per Gateway. `-f` follows the Gateway into its grant workers. `-D` matters: the sidecar part of the runtime test stops every descendant of the Gateway, and without `-D` the tracer is one of them, so the Gateway it traces stops too and the test hangs. With `-D` the tracer detaches from the Gateway's process tree. In each trace file, search for `+++ killed by SIGSYS +++`. The line above it with the same process ID is the call the filter killed; ignore the result `strace` prints for it. Tracing slows the Gateway, so one of the test's timing assertions can fail under it. The trace up to that point is still complete.
+
+The same number is a different call on each architecture, so map it with the architecture from the audit line. `ausyscall`, from the `auditd` package, takes both:
+
+```sh
+ausyscall aarch64 56   # openat
+ausyscall x86_64 56    # clone
+```
+
+Without it, read the kernel's `unistd.h` for the architecture: `/usr/include/x86_64-linux-gnu/asm/unistd_64.h` on x86-64 and `/usr/include/asm-generic/unistd.h` on arm64, where `grep -w 56` finds `#define __NR_openat 56`. Read the header that matches the architecture of the killed worker, not of the machine you are reading on.
+
+A call a grant worker needs goes in the allow-list in `crates/countersign-gateway/src/worker_sandbox.rs`, with the reason beside it as a comment: `ALLOWED` for a call allowed whatever its arguments, or the argument-checked list below it. A call the worker should not make is a bug in the worker, not a gap in the list.
+
 ## Install with conda on Linux
 
 On a Linux desktop with rattler-build and conda installed, place the local channel outside the checkout. Build, install and start the packaged application in the graphical login session.
