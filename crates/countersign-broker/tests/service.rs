@@ -756,6 +756,36 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     assert_eq!(successor["state"], "approved");
     assert!(successor["expires_at_ms"].as_u64().unwrap() < expires);
 
+    let refused: Value = h
+        .post(
+            "backend/renew",
+            BACKEND,
+            json!({"binding":credentials["binding"],"id":second}),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    send(&mut sock, frame("fetch", json!({"id":refused["id"]}))).await;
+    let offered = receive(&mut sock, "offer").await["body"].clone();
+    send(
+        &mut sock,
+        frame(
+            "decide",
+            json!({"binding":offered["binding"],"answer":"deny"}),
+        ),
+    )
+    .await;
+    send(&mut sock, frame("inbox", json!({}))).await;
+    receive(&mut sock, "inbox").await;
+    let denied = status(&h, &refused["id"]).await;
+    assert_eq!(denied["state"], "denied");
+    assert!(denied.get("expires_at_ms").is_none(), "{denied}");
+    assert!(denied.get("certificate").is_none(), "{denied}");
+    assert_eq!(status(&h, &second).await["state"], "approved");
+
     let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
     let ended = db
         .query_row(
