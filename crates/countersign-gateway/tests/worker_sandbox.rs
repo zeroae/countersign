@@ -202,6 +202,7 @@ mod linux {
                 "trace-me" => trace_me(),
                 "raise" => raise(number(1) as libc::c_int),
                 "fork" => fork(),
+                "clone3" => clone3(),
                 "signal-on-io" => signal_on_io(number(1) as libc::pid_t),
                 #[cfg(target_arch = "x86_64")]
                 "x32" => x32(),
@@ -316,6 +317,27 @@ mod linux {
     fn fork() -> Result<(), i32> {
         // SAFETY: the new process calls only `_exit`, which is async-signal-safe.
         let pid = unsafe { libc::fork() };
+        if pid == 0 {
+            unsafe { libc::_exit(0) };
+        }
+        checked(pid)
+    }
+
+    /// A second process by `clone3`, whose flags are in a structure that a
+    /// seccomp filter cannot read. It ends at once.
+    fn clone3() -> Result<(), i32> {
+        // SAFETY: an all-zero `clone_args` is valid: no flags, so a new process.
+        let mut args: libc::clone_args = unsafe { std::mem::zeroed() };
+        args.exit_signal = libc::SIGCHLD as u64;
+        // SAFETY: `args` outlives the call, with its size. The new process
+        // runs on a copy of this stack and calls only `_exit`.
+        let pid = unsafe {
+            libc::syscall(
+                libc::SYS_clone3,
+                &raw const args,
+                size_of::<libc::clone_args>(),
+            )
+        };
         if pid == 0 {
             unsafe { libc::_exit(0) };
         }
@@ -702,6 +724,29 @@ mod linux {
             refused_only_when_confined(|_| "fork".into());
             each_of_two(NO_CLONE3, |_| "fork".into(), Outcome::refused, "a refusal");
         }),
+        (
+            "starting_another_process_by_clone3_fails_as_unsupported",
+            || {
+                each_of_two(
+                    UNCONFINED,
+                    |_| "clone3".into(),
+                    |o| *o == Outcome::GotThrough,
+                    "success",
+                );
+                // Not a kill: the C library asks for a thread by clone3 first, and
+                // takes this answer as its cue to use clone (ADR 0002).
+                for attacker in 0..2 {
+                    let mut pair = [StandIn::start(CONFINED), StandIn::start(CONFINED)];
+                    assert_eq!(
+                        pair[attacker].attempt("clone3"),
+                        Outcome::Errno(libc::ENOSYS)
+                    );
+                    // The stand-in lives on, and so does the other.
+                    assert_eq!(pair[attacker].attempt("ping"), Outcome::GotThrough);
+                    assert_eq!(pair[1 - attacker].attempt("ping"), Outcome::GotThrough);
+                }
+            },
+        ),
         (
             "having_the_kernel_signal_another_process_is_refused",
             || {

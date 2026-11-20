@@ -184,8 +184,7 @@ const ALLOWED: &[libc::c_long] = &[
     #[cfg(target_arch = "x86_64")]
     libc::SYS_epoll_wait,
     libc::SYS_eventfd2,
-    // Threads and their synchronisation.
-    libc::SYS_clone3,
+    // Threads' synchronisation. Starting one is `clone`, below.
     libc::SYS_set_robust_list,
     libc::SYS_rseq,
     libc::SYS_futex,
@@ -261,6 +260,14 @@ fn allow_list() -> io::Result<()> {
         ),
         kill,
     ]);
+    // clone3 takes its flags in a structure, which a filter cannot read, so
+    // it cannot be allowed for threads alone. It is answered as a kernel
+    // without it answers, and the C library then starts the thread with clone.
+    // The one call outside the allow-list that does not kill (ADR 0002).
+    filter.extend([
+        op(EQUAL, number(libc::SYS_clone3), 0, 1),
+        op(RETURN, libc::SECCOMP_RET_ERRNO | libc::ENOSYS as u32, 0, 0),
+    ]);
     for nr in ALLOWED {
         filter.extend([op(EQUAL, number(*nr), 0, 1), allow]);
     }
@@ -285,9 +292,8 @@ fn allow_list() -> io::Result<()> {
                 ]),
             )],
         ),
-        // A thread, where the host has no clone3: Docker's default profile
-        // answers clone3 with ENOSYS, and the C library falls back to clone.
-        // Unlike clone3's, clone's flags are an argument the filter can read.
+        // A thread. Unlike clone3's, clone's flags are an argument the filter
+        // can read.
         (
             libc::SYS_clone,
             &[(DATA_ARG0, Test::Bit(libc::CLONE_THREAD as u32))],
