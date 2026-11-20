@@ -278,6 +278,9 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                                     r'grant fenced'), log
                 assert request('alice').returncode != 0, 'A grant whose worker the filter killed was served again'
                 assert request('bob').returncode == 0, "Alice's killed grant worker affected Bob"
+                # A fresh approval is a new grant, which gets a new grant worker.
+                broker.accounts[token(bindings['alice'])][2].update(grant='alice-approved-again')
+                assert request('alice').returncode == 0, 'A fresh approval did not restore service'
                 return
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(users)) as pool:
                 results = list(pool.map(request,users))

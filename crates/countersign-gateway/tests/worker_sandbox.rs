@@ -46,6 +46,11 @@ mod linux {
 
     pub fn main() {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        // Yama's default lets a process read only its descendants' memory,
+        // which alone would refuse every memory read below. The supervisor and
+        // each stand-in opt out, so the worker sandbox is what refuses them.
+        // SAFETY: the option takes one integer. Without Yama it fails, unneeded.
+        unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0) };
         if let [role, mode] = args.as_slice()
             && role == "stand-in"
         {
@@ -390,6 +395,14 @@ mod linux {
         }
     }
 
+    struct KillOnDrop<'a>(&'a mut Child);
+    impl Drop for KillOnDrop<'_> {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     /// What the attempt is aimed at, when it needs a process to aim at.
     struct Target {
         supervisor_pid: u32,
@@ -513,11 +526,66 @@ mod linux {
             refused_only_when_confined(|t| format!("open /proc/{}/environ", t.supervisor_pid));
         }),
         ("reading_the_supervisors_memory_is_refused", || {
-            refused(|t| format!("read-memory {} {}", t.supervisor_pid, t.supervisor_secret));
+            refused_only_when_confined(|t| {
+                format!("read-memory {} {}", t.supervisor_pid, t.supervisor_secret)
+            });
         }),
         ("reading_the_other_grant_workers_memory_is_refused", || {
-            refused(|t| format!("read-memory {} {}", t.other_pid, t.other_secret));
+            refused_only_when_confined(|t| {
+                format!("read-memory {} {}", t.other_pid, t.other_secret)
+            });
         }),
+        (
+            "an_unconfined_process_cannot_read_a_grant_workers_memory",
+            || {
+                // Non-dumpable memory, on its own: this reader runs under no filter.
+                let mut reader = StandIn::start(UNCONFINED);
+                let worker = StandIn::start(CONFINED);
+                assert_eq!(
+                    reader.attempt(&format!("read-memory {} {}", worker.pid, worker.secret)),
+                    Outcome::Errno(libc::EPERM)
+                );
+            },
+        ),
+        (
+            "the_grant_worker_is_confined_before_it_is_sent_anything",
+            || {
+                // The Gateway's own grant worker, started as the supervisor starts
+                // it, less bubblewrap. Nothing has been sent to it yet.
+                let (control, child_control) = UnixDatagram::pair().unwrap();
+                let mut worker = Command::new(env!("CARGO_BIN_EXE_countersign-gateway"))
+                    .env_clear()
+                    .arg("grant-worker")
+                    .stdin(Stdio::from(OwnedFd::from(child_control)))
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let status = format!("/proc/{}/status", worker.id());
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let confined = loop {
+                    let status = std::fs::read_to_string(&status).unwrap();
+                    let field = |name: &str| {
+                        let line = status.lines().find(|line| line.starts_with(name));
+                        line.and_then(|line| line.split_whitespace().nth(1).map(str::to_owned))
+                    };
+                    // 2 is filter mode.
+                    if field("Seccomp:").as_deref() == Some("2") {
+                        break field("NoNewPrivs:").as_deref() == Some("1");
+                    }
+                    if std::time::Instant::now() > deadline {
+                        break false;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                };
+                let _guard = KillOnDrop(&mut worker);
+                assert!(confined, "the grant worker waited for input unconfined");
+                // Asked as the startup probe asks, it reports its Landlock layer and exits.
+                control.send(&[0]).unwrap();
+                let mut report = [0u8; 2];
+                assert_eq!(control.recv(&mut report).unwrap(), 1);
+                assert!(_guard.0.wait().unwrap().success());
+            },
+        ),
         ("a_tcp_connection_is_refused", || {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
