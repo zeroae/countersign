@@ -548,6 +548,9 @@ fn decide(
                     certificate: ValidatedCertificate {
                         sha256: hash,
                         not_after_unix_seconds: expiry,
+                        subject: valid.subject,
+                        issuer: valid.issuer,
+                        leaf_not_after_unix_seconds: valid.leaf_end,
                     },
                     duration_seconds: duration_s,
                 },

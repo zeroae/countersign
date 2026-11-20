@@ -36,6 +36,9 @@ pub(crate) struct Validator {
 pub(crate) struct Verdict {
     pub certificate_end: i64,
     pub evidence_end: i64,
+    pub subject: String,
+    pub issuer: String,
+    pub leaf_end: i64,
 }
 impl Validator {
     pub(crate) fn new(profile: Profile, default_ca: &Path) -> Result<Self> {
@@ -187,6 +190,9 @@ impl Validator {
         Ok(Verdict {
             certificate_end: cert_end,
             evidence_end: cert_end.min(until),
+            subject: client.subject().to_string(),
+            issuer: client.issuer().to_string(),
+            leaf_end: client.validity.not_after.timestamp(),
         })
     }
 }

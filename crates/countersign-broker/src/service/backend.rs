@@ -168,14 +168,15 @@ pub(super) async fn status(
              g.id, EXISTS(SELECT 1 FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='mtls_accepted'),
              (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='ingress_closed'),
              (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed'),
-             g.expires_at, lower(hex(g.certificate))
+             g.expires_at, lower(hex(g.certificate)), g.subject, g.issuer, g.not_after
              FROM approval a LEFT JOIN approved_grant g ON g.approval=a.id
              WHERE a.id=?1 AND a.integrator=?2 AND a.owner=?3",
             params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()],
             |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,
-                r.get::<_,Option<i64>>(5)?,r.get::<_,Option<String>>(6)?)),
+                r.get::<_,Option<i64>>(5)?,r.get::<_,Option<String>>(6)?,
+                (r.get::<_,Option<String>>(7)?,r.get::<_,Option<String>>(8)?,r.get::<_,Option<i64>>(9)?))),
         ).optional()?.ok_or(Fault::Unavailable)?;
-        let (state, grant, accepted, ingress_closed, egress_closed, expires_at, certificate_sha256) = row;
+        let (state, grant, accepted, ingress_closed, egress_closed, expires_at, certificate_sha256, leaf) = row;
         let ready = state=="approved" && grant.and_then(|id|a.grants.get(&id)).is_some_and(|g|{
             g.acknowledged && a.peers.get(g.activation.grant.device.pairing.as_str()).is_some_and(|p|p.binding==g.activation.grant.device)
         });
@@ -185,6 +186,12 @@ pub(super) async fn status(
         if let (Some(expires_at), Some(sha256)) = (expires_at, certificate_sha256) {
             view["expires_at_ms"] = json!(expires_at.checked_mul(1000).ok_or(Fault::Storage)?);
             view["certificate"] = json!({"sha256": sha256});
+            // A grant recorded before the Broker kept the leaf's names has none.
+            if let (Some(subject), Some(issuer), Some(not_after)) = leaf {
+                view["certificate"]["subject"] = json!(subject);
+                view["certificate"]["issuer"] = json!(issuer);
+                view["certificate"]["not_after_ms"] = json!(not_after.checked_mul(1000).ok_or(Fault::Storage)?);
+            }
         }
         Ok(Json(view))
     }).await

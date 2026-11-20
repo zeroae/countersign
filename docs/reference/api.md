@@ -69,7 +69,10 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
   "ready": true,
   "expires_at_ms": 1795470000000,
   "certificate": {
-    "sha256": "c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b"
+    "sha256": "c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b",
+    "subject": "CN=Demo user",
+    "issuer": "CN=Countersign demo client-ca",
+    "not_after_ms": 1795635570000
   },
   "upstream_mtls_accepted": false,
   "ingress_closed_count": 0,
@@ -82,6 +85,7 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
 - `expires_at_ms` and `certificate` describe the grant the user approved. They appear once an approval has a grant, and stay after it ends (`expired`, `cancelled` or `replaced`); a renewal's successor has its own approval ID and its own values. They are absent when the approval never had a grant: it is `pending`, `denied`, or it was `expired` or `cancelled` before anyone approved it. They are also absent once the [audit retention](config.md) period removes an ended approval's grant record.
 - `expires_at_ms` is the deadline the user approved, in milliseconds since the Unix epoch, in whole seconds. It is not always when access ends: a revocation, a renewal or a Gateway lease can end it sooner, and `state` says whether the grant is still in force.
 - `certificate.sha256` is the lowercase hex SHA-256 of the client certificate the user selected (its DER encoding). It is the fingerprint the Companion shows, without its spaces, of the certificate the protected site receives in the handshake.
+- `certificate.subject` and `certificate.issuer` are that certificate's distinguished names, and `certificate.not_after_ms` is its own expiry, in milliseconds since the Unix epoch. A grant recorded by a Broker older than these fields has `sha256` alone. A matching subject does not identify the key; compare `sha256`.
 - `upstream_mtls_accepted` is historical. It becomes true after the Gateway reports receiving upstream HTTP response headers on an authenticated connection.
 - `ingress_closed_count` and `egress_closed_count` count distinct reported socket closures on the two legs. Reports are best effort. Enforcers cut traffic at their local lease deadline even if they cannot report back. [Gateway observations](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/crates/countersign-broker/src/service/observations.rs)
 

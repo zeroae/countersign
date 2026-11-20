@@ -29,6 +29,8 @@ use uuid::Uuid;
 
 const ADMIN: &str = "test-only-dedicated-administrator-secret";
 const BACKEND: &str = "integration-test-dedicated-service-secret";
+/// 2099-01-01T00:00:00Z, the harness leaf's own not-after.
+const LEAF_NOT_AFTER_MS: u64 = 4_070_908_800_000;
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 struct Harness {
@@ -59,6 +61,10 @@ impl Harness {
         let client_key = KeyPair::generate().unwrap();
         let mut identity = CertificateParams::default();
         identity.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        identity
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Broker integration test user");
+        identity.not_after = rcgen::date_time_ymd(2099, 1, 1);
         let leaf = identity
             .signed_by(&client_key, &issuer)
             .unwrap()
@@ -717,7 +723,13 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     let first_expiry = approve(&h, &mut sock, &first, 900, false).await;
     let view = status(&h, &first).await;
     assert_eq!(view["state"], "approved");
-    assert_eq!(view["certificate"], json!({"sha256": sha256}));
+    let leaf = json!({
+        "sha256": sha256,
+        "subject": "CN=Broker integration test user",
+        "issuer": "CN=Broker integration test CA",
+        "not_after_ms": LEAF_NOT_AFTER_MS,
+    });
+    assert_eq!(view["certificate"], leaf);
     let expires = view["expires_at_ms"].as_u64().unwrap();
     assert_eq!(expires % 1000, 0, "whole seconds, as the grant stores them");
     assert!(
@@ -751,7 +763,7 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         replaced["expires_at_ms"], expires,
         "predecessor keeps its own deadline"
     );
-    assert_eq!(replaced["certificate"]["sha256"], sha256.as_str());
+    assert_eq!(replaced["certificate"], leaf);
     let successor = status(&h, &second).await;
     assert_eq!(successor["state"], "approved");
     assert!(successor["expires_at_ms"].as_u64().unwrap() < expires);
@@ -827,5 +839,16 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     assert_eq!(expired["state"], "expired");
     assert_eq!(expired["ready"], false);
     assert_eq!(expired["expires_at_ms"], expired_at_s * 1000);
-    assert_eq!(expired["certificate"]["sha256"], sha256.as_str());
+    assert_eq!(expired["certificate"], leaf);
+
+    // A grant recorded before the Broker kept the leaf's names reports its digest alone.
+    db.execute(
+        "UPDATE approved_grant SET subject=NULL, issuer=NULL, not_after=NULL WHERE approval=?1",
+        [second.as_str().unwrap()],
+    )
+    .unwrap();
+    assert_eq!(
+        status(&h, &second).await["certificate"],
+        json!({"sha256": sha256})
+    );
 }
