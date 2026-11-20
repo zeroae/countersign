@@ -67,6 +67,10 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
   "id": "85b80155-ac10-487f-a024-5216ec7f8ced",
   "state": "approved",
   "ready": true,
+  "expires_at_ms": 1795470000000,
+  "certificate": {
+    "sha256": "c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b"
+  },
   "upstream_mtls_accepted": false,
   "ingress_closed_count": 0,
   "egress_closed_count": 0
@@ -75,6 +79,9 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
 
 - `state` is `pending`, `approved`, `denied`, `cancelled`, `expired` or `replaced`. A pending offer has a ten-minute deadline. A successful renewal changes the predecessor's state to `replaced`.
 - `ready` means the winning Companion acknowledged activation and its matching channel is currently connected. An approved grant can have `ready: false` while that Companion is offline.
+- `expires_at_ms` and `certificate` describe the grant the user approved, and appear only once an approval has one. A `pending` or `denied` approval omits both. An approval that ended after it was granted (`expired`, `cancelled` or `replaced`) keeps its own grant's values; a renewal's successor has its own approval ID and its own values.
+- `expires_at_ms` is the grant's deadline, in milliseconds since the Unix epoch, in whole seconds. Access ends then unless a renewal replaces the grant first.
+- `certificate.sha256` is the lowercase hex SHA-256 of the client certificate the user selected (its DER encoding). It is the fingerprint the Companion shows, without its spaces, of the certificate the protected site receives in the handshake.
 - `upstream_mtls_accepted` is historical. It becomes true after the Gateway reports receiving upstream HTTP response headers on an authenticated connection.
 - `ingress_closed_count` and `egress_closed_count` count distinct reported socket closures on the two legs. Reports are best effort. Enforcers cut traffic at their local lease deadline even if they cannot report back. [Gateway observations](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/crates/countersign-broker/src/service/observations.rs)
 

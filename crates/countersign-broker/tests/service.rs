@@ -462,6 +462,9 @@ async fn authenticated_consent_signing_reconnect_and_revocation() {
     assert_eq!(ended["state"], "cancelled");
     assert_eq!(ended["ready"], false);
     assert_eq!(ended["egress_closed_count"], 1);
+    assert_eq!(ended["expires_at_ms"], view["expires_at_ms"]);
+    assert_eq!(ended["certificate"], view["certificate"]);
+    assert!(ended["certificate"]["sha256"].is_string(), "{ended}");
     assert!(
         !h.post("gateway/lease", token, lease(3))
             .await
@@ -627,4 +630,143 @@ async fn admin_authority_and_context_tombstones_gate_workload_admission() {
         h.post("backend/requests", BACKEND, request).await.status(),
         403
     );
+}
+
+async fn status(h: &Harness, id: &Value) -> Value {
+    h.post("backend/status", BACKEND, json!({"user":"u","id":id}))
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+/// Approves the pending approval `id` with the harness leaf and returns the activation's deadline.
+/// A renewal's approval also retires its predecessor's grant on this Companion.
+async fn approve(
+    h: &Harness,
+    sock: &mut Socket,
+    id: &Value,
+    duration_s: u64,
+    renewal: bool,
+) -> u64 {
+    let hash = digest::digest(&digest::SHA256, &h.leaf);
+    send(sock, frame("fetch", json!({"id":id}))).await;
+    let offered = receive(sock, "offer").await["body"].clone();
+    send(
+        sock,
+        frame(
+            "decide",
+            json!({"binding":offered["binding"],"answer":{"approve":{
+                "duration_s":duration_s,"chain":[STANDARD.encode(&h.leaf)],
+                "cert_sha256":STANDARD.encode(hash.as_ref())
+            }}}),
+        ),
+    )
+    .await;
+    let activation = receive(sock, "activate").await["body"].clone();
+    if renewal {
+        receive(sock, "retire").await;
+    }
+    send(sock, frame("activated", activation.clone())).await;
+    send(sock, frame("inbox", json!({}))).await;
+    receive(sock, "inbox").await;
+    activation["expires_at_ms"].as_u64().unwrap()
+}
+#[tokio::test]
+async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
+    let h = Harness::start().await;
+    let (mut sock, _) = pair(&h, "u").await;
+    let credentials: Value = h
+        .post(
+            "backend/workloads",
+            BACKEND,
+            json!({"user":"u","context":"job","workload":"instance","workload_generation":1}),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = credentials["token"].as_str().unwrap();
+    let pending: Value = h
+        .post(
+            "gateway/admit",
+            token,
+            frame(
+                "connect",
+                json!({"workload":credentials["binding"],"host":"upstream.test:443"}),
+            ),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let first = pending["body"]["id"].clone();
+    let view = status(&h, &first).await;
+    assert_eq!(view["state"], "pending");
+    assert!(view.get("expires_at_ms").is_none(), "{view}");
+    assert!(view.get("certificate").is_none(), "{view}");
+
+    let hash = digest::digest(&digest::SHA256, &h.leaf);
+    let sha256: String = hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let before = millis();
+    let first_expiry = approve(&h, &mut sock, &first, 900, false).await;
+    let view = status(&h, &first).await;
+    assert_eq!(view["state"], "approved");
+    assert_eq!(view["certificate"], json!({"sha256": sha256}));
+    let expires = view["expires_at_ms"].as_u64().unwrap();
+    assert_eq!(expires % 1000, 0, "whole seconds, as the grant stores them");
+    assert!(
+        (before + 899_000..=millis() + 900_000).contains(&expires),
+        "{expires}"
+    );
+    assert!(
+        expires.abs_diff(first_expiry) < 1000,
+        "{expires} vs {first_expiry}"
+    );
+
+    let renewed: Value = h
+        .post(
+            "backend/renew",
+            BACKEND,
+            json!({"binding":credentials["binding"],"id":first}),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let second = renewed["id"].clone();
+    assert_ne!(second, first);
+    assert!(status(&h, &second).await.get("certificate").is_none());
+    approve(&h, &mut sock, &second, 600, true).await;
+    let replaced = status(&h, &first).await;
+    assert_eq!(replaced["state"], "replaced");
+    assert_eq!(
+        replaced["expires_at_ms"], expires,
+        "predecessor keeps its own deadline"
+    );
+    assert_eq!(replaced["certificate"]["sha256"], sha256.as_str());
+    let successor = status(&h, &second).await;
+    assert_eq!(successor["state"], "approved");
+    assert!(successor["expires_at_ms"].as_u64().unwrap() < expires);
+
+    let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
+    let ended = db
+        .query_row(
+            "UPDATE approved_grant SET expires_at=unixepoch()-5 WHERE approval=?1 RETURNING expires_at",
+            [second.as_str().unwrap()],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap();
+    let expired = status(&h, &second).await;
+    assert_eq!(expired["state"], "expired");
+    assert_eq!(expired["ready"], false);
+    assert_eq!(expired["expires_at_ms"], ended * 1000);
+    assert_eq!(expired["certificate"]["sha256"], sha256.as_str());
 }

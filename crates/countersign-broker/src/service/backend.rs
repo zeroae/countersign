@@ -167,17 +167,26 @@ pub(super) async fn status(
              WHEN state='approved' AND g.expires_at<=unixepoch() THEN 'expired' ELSE state END,
              g.id, EXISTS(SELECT 1 FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='mtls_accepted'),
              (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='ingress_closed'),
-             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed')
+             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed'),
+             g.expires_at, lower(hex(g.certificate))
              FROM approval a LEFT JOIN approved_grant g ON g.approval=a.id
              WHERE a.id=?1 AND a.integrator=?2 AND a.owner=?3",
             params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()],
-            |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?)),
+            |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,
+                r.get::<_,Option<i64>>(5)?,r.get::<_,Option<String>>(6)?)),
         ).optional()?.ok_or(Fault::Unavailable)?;
-        let (state, grant, accepted, ingress_closed, egress_closed) = row;
+        let (state, grant, accepted, ingress_closed, egress_closed, expires_at, certificate) = row;
         let ready = state=="approved" && grant.and_then(|id|a.grants.get(&id)).is_some_and(|g|{
             g.acknowledged && a.peers.get(g.activation.grant.device.pairing.as_str()).is_some_and(|p|p.binding==g.activation.grant.device)
         });
-        Ok(Json(json!({"id":req.id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed})))
+        let mut view = json!({"id":req.id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed});
+        // A grant row outlives its approval's end (expired, replaced, cancelled), so these
+        // keep describing the grant that was approved; an approval that never had one omits them.
+        if let (Some(expires_at), Some(sha256)) = (expires_at, certificate) {
+            view["expires_at_ms"] = json!(expires_at.checked_mul(1000).ok_or(Fault::Storage)?);
+            view["certificate"] = json!({"sha256": sha256});
+        }
+        Ok(Json(view))
     }).await
 }
 pub(super) async fn revoke(
