@@ -18,7 +18,7 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
-use crate::sidecar::{sign_leaf, verified_worker_key};
+use crate::sidecar::{leaf_not_before, sign_leaf, verified_worker_key};
 
 type Failure = Box<dyn Error + Send + Sync>;
 type Chain = Vec<CertificateDer<'static>>;
@@ -46,6 +46,7 @@ enum Source {
     Local {
         issuer: Box<Issuer<'static, KeyPair>>,
         chain: Chain,
+        starts: OffsetDateTime,
         expires: OffsetDateTime,
     },
     Remote {
@@ -113,12 +114,14 @@ impl SharedIssuer {
                 {
                     return Err("invalid proxy CA credential".into());
                 }
+                let starts = parsed.validity.not_before.to_datetime();
                 let expires = parsed.validity.not_after.to_datetime();
                 let issuer = Box::new(Issuer::from_ca_cert_der(ca, key)?);
                 roots.add(chain.last().ok_or("empty CA chain")?.clone())?;
                 Source::Local {
                     issuer,
                     chain,
+                    starts,
                     expires,
                 }
             }
@@ -186,13 +189,20 @@ impl SharedIssuer {
             Source::Local {
                 issuer,
                 chain,
+                starts,
                 expires,
             } => {
                 let deadline = grant_not_after.min(*expires);
                 if deadline.unix_timestamp() <= now.unix_timestamp() {
                     return Err("issuer has expired".into());
                 }
-                let leaf = sign_leaf(origin, &key, now, deadline, issuer)?;
+                let leaf = sign_leaf(
+                    origin,
+                    &key,
+                    leaf_not_before(now, *starts),
+                    deadline,
+                    issuer,
+                )?;
                 std::iter::once(leaf).chain(chain.iter().cloned()).collect()
             }
             Source::Remote {
@@ -529,9 +539,44 @@ mod tests {
             .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
             .await
             .unwrap();
+        // A client whose clock runs half a minute behind finds the leaf valid.
+        let (_, leaf) = x509_parser::parse_x509_certificate(&chain[0]).unwrap();
+        let behind = (OffsetDateTime::now_utc() - time::Duration::seconds(30)).unix_timestamp();
+        assert!(leaf.validity.not_before.timestamp() <= behind);
         site.tls(chain);
         fs::write(key, KeyPair::generate().unwrap().serialize_pem()).unwrap();
         assert!(SharedIssuer::open(source, site.policy).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_leaf_never_starts_before_the_ca_that_signs_it() {
+        // An Integrator's CA minted seconds ago: the leaf is backdated for a
+        // client whose clock runs behind, but never to before its own issuer.
+        let site = TestSite::new();
+        let minted = OffsetDateTime::now_utc() - time::Duration::seconds(5);
+        let mut params = CertificateParams::default();
+        params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+        params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+        params.not_before = minted;
+        let ca_key = KeyPair::generate().unwrap();
+        let ca = params.self_signed(&ca_key).unwrap();
+        let dir = tempdir().unwrap();
+        let cert = dir.path().join("ca.pem");
+        let key = dir.path().join("key.pem");
+        fs::write(&cert, ca.pem()).unwrap();
+        fs::write(&key, ca_key.serialize_pem()).unwrap();
+        let issuer = SharedIssuer::open(SharedCaSource::Local { cert, key }, site.policy.clone())
+            .await
+            .unwrap();
+        let chain = issuer
+            .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
+            .await
+            .unwrap();
+        let (_, leaf) = x509_parser::parse_x509_certificate(&chain[0]).unwrap();
+        assert_eq!(
+            leaf.validity.not_before.timestamp(),
+            minted.unix_timestamp()
+        );
     }
 
     #[tokio::test]

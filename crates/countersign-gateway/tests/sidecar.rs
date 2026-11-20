@@ -118,6 +118,31 @@ fn leaf_has_only_the_authorized_host_public_key_usage_and_lifetime() {
 }
 
 #[test]
+fn a_client_whose_clock_runs_behind_accepts_the_ca_and_the_leaf() {
+    use x509_parser::time::ASN1Time;
+
+    // A client validates with its own clock. Half a minute behind the Gateway
+    // is an ordinary host, and such a client has to find both already valid.
+    let behind = ASN1Time::from_timestamp(
+        (OffsetDateTime::now_utc() - Duration::seconds(30)).unix_timestamp(),
+    )
+    .unwrap();
+    let origin = Origin::parse("api.example.test:443").unwrap();
+    let policy = policy();
+    let scope = policy.scope_for(&origin).unwrap();
+    let issuer = SidecarIssuer::new(policy, after(3)).unwrap();
+    let (_, ca) = parse_x509_certificate(issuer.public_cert_der()).unwrap();
+    let key = KeyPair::generate().unwrap();
+    let der = issuer
+        .issue(&scope, &origin, after(1), &csr(&key, &[origin.host()]))
+        .unwrap();
+    let (_, leaf) = parse_x509_certificate(&der).unwrap();
+
+    assert!(ca.validity.is_valid_at(behind), "{:?}", ca.validity);
+    assert!(leaf.validity.is_valid_at(behind), "{:?}", leaf.validity);
+}
+
+#[test]
 fn wildcard_grant_cannot_mint_leaves_for_other_ports_apex_or_overrides() {
     let api = Origin::parse("api.example.test:443").unwrap();
     let policy = policy();
