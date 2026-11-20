@@ -231,7 +231,8 @@ enum Test<'a> {
     Bit(u32),
 }
 
-/// The seccomp filter. A system call outside it kills the whole process.
+/// The seccomp filter. A system call outside it kills the whole process,
+/// bar `clone3`, which fails as unsupported (ADR 0002).
 fn allow_list() -> io::Result<()> {
     const LOAD: u16 = (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16;
     const EQUAL: u16 = (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16;

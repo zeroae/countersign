@@ -44,8 +44,9 @@ mod linux {
     const LANDLOCK_REFUSED: &str = "landlock-refused";
     /// A container profile older than Landlock answers its calls this way.
     const LANDLOCK_DENIED: &str = "landlock-denied";
-    /// Docker's default profile answers `clone3` this way, and the C library
-    /// then starts threads with `clone`.
+    /// Docker's default profile answers `clone3` this way, ahead of the
+    /// allow-list, which gives the same answer (ADR 0002). So this setup
+    /// differs from a confined one only before confinement.
     const NO_CLONE3: &str = "no-clone3";
 
     /// Stands in for a secret in the supervisor's or a grant worker's memory.
@@ -727,24 +728,28 @@ mod linux {
         (
             "starting_another_process_by_clone3_fails_as_unsupported",
             || {
-                each_of_two(
-                    UNCONFINED,
-                    |_| "clone3".into(),
-                    |o| *o == Outcome::GotThrough,
-                    "success",
-                );
-                // Not a kill: the C library asks for a thread by clone3 first, and
-                // takes this answer as its cue to use clone (ADR 0002).
-                for attacker in 0..2 {
-                    let mut pair = [StandIn::start(CONFINED), StandIn::start(CONFINED)];
-                    assert_eq!(
-                        pair[attacker].attempt("clone3"),
-                        Outcome::Errno(libc::ENOSYS)
+                // A host may answer clone3 this way itself, as Docker's default
+                // profile and a kernel before 5.3 do. There the call cannot be
+                // shown to get through unconfined.
+                if StandIn::start(UNCONFINED).attempt("clone3") == Outcome::Errno(libc::ENOSYS) {
+                    println!("     this host has no clone3: the call fails unconfined too");
+                } else {
+                    each_of_two(
+                        UNCONFINED,
+                        |_| "clone3".into(),
+                        |o| *o == Outcome::GotThrough,
+                        "success",
                     );
-                    // The stand-in lives on, and so does the other.
-                    assert_eq!(pair[attacker].attempt("ping"), Outcome::GotThrough);
-                    assert_eq!(pair[1 - attacker].attempt("ping"), Outcome::GotThrough);
                 }
+                // Not a kill: the C library asks for a thread by clone3 first, and
+                // takes this answer as its cue to use clone (ADR 0002). The reply
+                // itself shows the stand-in lived to serve its stream.
+                each_of_two(
+                    CONFINED,
+                    |_| "clone3".into(),
+                    |o| *o == Outcome::Errno(libc::ENOSYS),
+                    "ENOSYS",
+                );
             },
         ),
         (
