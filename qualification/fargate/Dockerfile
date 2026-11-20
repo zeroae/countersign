@@ -28,7 +28,8 @@ RUN set -eu; \
     fi; \
     built() { \
       cargo "$@" --locked --release --target "$target" -p countersign-gateway --message-format=json \
-        | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p'; \
+        >/tmp/built.json; \
+      sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' /tmp/built.json; \
     }; \
     gateway=$(built build --bin countersign-gateway); \
     containment=$(built test --no-run --test worker_sandbox | grep /deps/worker_sandbox-); \
@@ -44,7 +45,11 @@ RUN set -eu; \
 FROM --platform=$BUILDPLATFORM python:3.12-slim-bookworm AS needs
 ARG TARGETARCH
 RUN set -eu; \
-    case "$TARGETARCH" in amd64) machine=x86_64 ;; arm64) machine=aarch64 ;; esac; \
+    case "$TARGETARCH" in \
+      amd64) machine=x86_64 ;; \
+      arm64) machine=aarch64 ;; \
+      *) echo "unsupported architecture $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
     pip install --no-cache-dir --target /stage/qualification/python --only-binary=:all: \
       --python-version 3.12 --implementation cp \
       --platform "manylinux_2_28_$machine" --platform "manylinux_2_17_$machine" --platform "manylinux2014_$machine" \

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs inside the qualification image, as the task's only command: says what
-# host this is, then runs the Gateway's two test seams under the filter
-# sandbox. Exits non-zero at the first step that fails.
+# host this is, then runs the Gateway's containment test and its runtime test under the
+# filter sandbox. Exits non-zero at the first step that fails.
 set -eu
 
 fact() { printf '%s: %s\n' "$1" "$2"; }
@@ -18,6 +18,8 @@ fact 'Yama ptrace_scope' "$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null |
 fact 'LSMs' "$(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
 
 echo '== The host refuses namespaces'
+# Without the program, its failure would say nothing about the host.
+command -v unshare >/dev/null || { echo 'The qualification image has no unshare.' >&2; exit 1; }
 if unshare --user true 2>/dev/null; then
   echo 'This host can create user namespaces, so it proves nothing about the filter sandbox.' >&2
   exit 1
@@ -36,4 +38,4 @@ timeout 300 worker-sandbox-containment
 echo '== Runtime test under the filter sandbox'
 timeout 300 python3 /qualification/runtime.py "$(command -v countersign-gateway)" --worker-sandbox filter
 
-echo '== Qualified: both test seams passed under the filter sandbox'
+echo '== Qualified: the containment test and the runtime test passed under the filter sandbox'

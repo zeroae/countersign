@@ -69,32 +69,53 @@ build() {
 }
 
 # Start every task first, then wait for each: the architectures run at once.
+# A task that passed has to name this checkout's revision, so that a run
+# without a build cannot pass on an image built from another commit.
 run() {
-  local cluster network group failed=0
+  local cluster network group revision failed=0 index
   cluster=$(output Cluster)
   group=$(output LogGroup)
   network="awsvpcConfiguration={subnets=[$(output Subnet)],securityGroups=[$(output SecurityGroup)],assignPublicIp=ENABLED}"
-  local -A tasks
+  revision=$(git describe --always --dirty)
+  local tasks=()
   for architecture in "${architectures[@]}"; do
-    tasks[$architecture]=$(aws ecs run-task --cluster "$cluster" --launch-type FARGATE \
+    local started task reason
+    started=$(aws ecs run-task --cluster "$cluster" --launch-type FARGATE \
       --platform-version 1.4.0 --task-definition "$stack-$architecture" \
-      --network-configuration "$network" --query 'tasks[0].taskArn' --output text)
-    echo "started $architecture: ${tasks[$architecture]}"
+      --network-configuration "$network" \
+      --query '[tasks[0].taskArn, failures[0].reason]' --output text)
+    read -r task reason <<<"$started"
+    if [ "$task" = None ]; then
+      echo "Fargate did not start the $architecture task: $reason" >&2
+      return 1
+    fi
+    tasks+=("$task")
+    echo "started $architecture: $task"
   done
-  for architecture in "${architectures[@]}"; do
-    local task=${tasks[$architecture]} code
-    aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
+  for index in "${!architectures[@]}"; do
+    local architecture=${architectures[$index]} task=${tasks[$index]} code log
+    # One wait gives up after ten minutes, which a task whose two tests both
+    # run to their timeouts outlasts.
+    aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task" ||
+      aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task" || true
     echo "==== Fargate $architecture"
     aws ecs describe-tasks --cluster "$cluster" --tasks "$task" --output text --query \
-      'tasks[0].[join(`: `, [`Platform`, platformFamily, platformVersion]), join(`: `, [`Architecture`, attributes[?name==`ecs.cpu-architecture`].value | [0]]), join(`: `, [`Image digest`, containers[0].imageDigest || `none`]), join(`: `, [`Stopped`, stoppedReason || `no reason given`])]' |
+      'tasks[0].[join(`: `, [`Platform`, platformFamily, platformVersion]), join(`: `, [`Architecture`, attributes[?name==`ecs.cpu-architecture`].value | [0]]), join(`: `, [`Image digest`, containers[0].imageDigest || `none`]), join(`: `, [`Status`, lastStatus]), join(`: `, [`Stopped`, stoppedReason || `no reason given`])]' |
       tr '\t' '\n'
-    aws logs get-log-events --log-group-name "$group" \
-      --log-stream-name "$architecture/qualify/${task##*/}" --start-from-head \
-      --query 'events[].message' --output text | tr '\t' '\n' || true
+    # filter-log-events follows the pages of a long log, as get-log-events
+    # does not.
+    log=$(aws logs filter-log-events --log-group-name "$group" \
+      --log-stream-names "$architecture/qualify/${task##*/}" \
+      --query 'events[].message' --output text | tr '\t' '\n') || log='(the task left no log)'
+    printf '%s\n' "$log"
     code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
       --query 'tasks[0].containers[0].exitCode' --output text)
     echo "==== Fargate $architecture exit code: $code"
     [ "$code" = 0 ] || failed=1
+    if ! grep -qxF "Countersign revision: $revision" <<<"$log"; then
+      echo "==== Fargate $architecture did not run this checkout ($revision): build its image first" >&2
+      failed=1
+    fi
   done
   return $failed
 }

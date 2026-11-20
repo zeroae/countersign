@@ -1,5 +1,5 @@
-# The Fargate qualification harness: where run.sh runs the Gateway's two test
-# seams on real ECS Fargate, on x86-64 and arm64. It is a qualification tool,
+# The Fargate qualification harness: where run.sh runs the Gateway's containment
+# test and its runtime test on real ECS Fargate, on x86-64 and arm64. It is a qualification tool,
 # and the Gateway never depends on it. Deleting the stack removes every
 # resource, images included. run.sh deploys and deletes it.
 AWSTemplateFormatVersion: "2010-09-09"
@@ -143,7 +143,3 @@ Outputs:
     Value: !Ref SecurityGroup
   LogGroup:
     Value: !Ref LogGroup
-  TaskDefinitionX8664:
-    Value: !Ref TaskDefinitionX8664
-  TaskDefinitionArm64:
-    Value: !Ref TaskDefinitionArm64
