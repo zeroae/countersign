@@ -1,5 +1,8 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use countersign_gateway::upstream::{self, SigningRelay};
+use countersign_gateway::{
+    upstream::{self, SigningRelay},
+    worker_sandbox::{Landlock, Layers},
+};
 use countersign_protocol::{
     Origin,
     wire::{GatewayActivation, SignatureScheme as Scheme, TlsVersion},
@@ -16,12 +19,15 @@ use std::{
     io::{IoSlice, IoSliceMut, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::net::{UnixDatagram, UnixStream},
+        unix::{
+            net::{UnixDatagram, UnixStream},
+            process::ExitStatusExt,
+        },
     },
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -122,12 +128,27 @@ fn sandbox(executable: &std::path::Path) -> Command {
     command
 }
 
+/// Resolves with a grant worker's exit status when it ends on its own, and
+/// with an error when the supervisor stopped it.
+pub type Exit = tokio::sync::oneshot::Receiver<ExitStatus>;
+
+/// Whether the seccomp allow-list killed this grant worker. bubblewrap, which
+/// the supervisor waits on under the namespace sandbox, reports its child's
+/// fatal signal as an exit code of 128 plus the signal (measured with
+/// bubblewrap 0.9.0 on 2026-11-19: `bwrap ... sh -c 'kill -SYS $$'` exits 159).
+pub fn killed_by_filter(status: ExitStatus) -> bool {
+    let sigsys = nix::libc::SIGSYS;
+    status.signal() == Some(sigsys) || status.code() == Some(128 + sigsys)
+}
+
 pub struct ChildHandle {
-    child: tokio::process::Child,
     control: UnixDatagram,
+    exited: Arc<AtomicBool>,
+    /// Dropping this stops the grant worker.
+    _stop: tokio::sync::oneshot::Sender<()>,
 }
 impl ChildHandle {
-    fn start(stderr: Stdio) -> Result<Self> {
+    fn start(stderr: Stdio) -> Result<(tokio::process::Child, UnixDatagram)> {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
         let child = tokio::process::Command::from(sandbox(&std::env::current_exe()?))
@@ -137,20 +158,46 @@ impl ChildHandle {
             .stdout(Stdio::null())
             .stderr(stderr)
             .spawn()?;
-        Ok(Self { child, control })
+        Ok((child, control))
     }
 
-    pub fn launch() -> Result<Self> {
-        Self::start(Stdio::null())
+    pub fn launch() -> Result<(Self, Exit)> {
+        let (mut child, control) = Self::start(Stdio::null())?;
+        let exited = Arc::new(AtomicBool::new(false));
+        let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
+        let (report, exit) = tokio::sync::oneshot::channel();
+        let flag = exited.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                status = child.wait() => {
+                    flag.store(true, Ordering::Release);
+                    if let Ok(status) = status {
+                        let _ = report.send(status);
+                    }
+                }
+                _ = &mut stopped => {
+                    let _ = child.kill().await;
+                }
+            }
+        });
+        Ok((
+            Self {
+                control,
+                exited,
+                _stop: stop,
+            },
+            exit,
+        ))
     }
 
     /// Check the actual host sandbox, executable and control socket at startup.
-    /// This short-lived worker receives no grant, credentials or traffic.
-    pub async fn verify_environment() -> Result<()> {
-        let probe = Self::start(Stdio::piped())?;
-        probe.control.send(&[0])?;
+    /// This short-lived worker receives no grant, credentials or traffic. It
+    /// confines itself as every grant worker does and reports its layers.
+    pub async fn verify_environment() -> Result<Layers> {
+        let (child, control) = Self::start(Stdio::piped())?;
+        control.send(&[0])?;
         let output =
-            tokio::time::timeout(Duration::from_secs(5), probe.child.wait_with_output()).await??;
+            tokio::time::timeout(Duration::from_secs(5), child.wait_with_output()).await??;
         if !output.status.success() {
             let hint: String = String::from_utf8_lossy(&output.stderr)
                 .split_whitespace()
@@ -165,11 +212,21 @@ impl ChildHandle {
             ))
             .into());
         }
-        Ok(())
+        // The report was queued before the probe exited.
+        let mut report = [0u8; 2];
+        match control.recv(&mut report) {
+            Ok(1) => Ok(Layers {
+                landlock: match report[0] {
+                    0 => Landlock::Unavailable,
+                    abi => Landlock::Abi(abi),
+                },
+            }),
+            _ => Err(invalid("grant worker reported no worker sandbox layers")),
+        }
     }
 
     pub fn attach(&mut self) -> Result<[tokio::net::UnixStream; 3]> {
-        if self.child.try_wait()?.is_some() {
+        if self.exited.load(Ordering::Acquire) {
             return Err(invalid("grant worker exited"));
         }
         let (a, b) = UnixStream::pair()?;
@@ -191,7 +248,7 @@ impl ChildHandle {
     }
 }
 
-pub fn serve() -> Result<()> {
+pub fn serve(layers: Layers) -> Result<()> {
     // No secrets or network sockets are inherited. The authenticated parent
     // delivers three fresh, connected local stream endpoints per connection.
     let active = Arc::new(AtomicUsize::new(0));
@@ -218,6 +275,12 @@ pub fn serve() -> Result<()> {
             return Err(invalid("invalid worker dispatch"));
         }
         if byte == [0] && received.is_empty() {
+            // The startup probe: report the layers this grant worker runs under.
+            let report = match layers.landlock {
+                Landlock::Unavailable => 0,
+                Landlock::Abi(abi) => abi,
+            };
+            nix::unistd::write(std::io::stdin(), &[report])?;
             return Ok(());
         }
         if byte != [1] {
@@ -231,12 +294,11 @@ pub fn serve() -> Result<()> {
         }
         active.fetch_add(1, Ordering::AcqRel);
         let active = active.clone();
-        std::thread::Builder::new()
-            .name("grant-connection".into())
-            .spawn(move || {
-                let _ = run(down, up, control);
-                active.fetch_sub(1, Ordering::AcqRel);
-            })?;
+        // Unnamed: naming a thread is one more system call to allow.
+        std::thread::Builder::new().spawn(move || {
+            let _ = run(down, up, control);
+            active.fetch_sub(1, Ordering::AcqRel);
+        })?;
     }
 }
 

@@ -32,6 +32,9 @@ jobs:
       - run: cargo build --locked --workspace
       - name: Exercise shared and sidecar workers and lease cutoff
         run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
+      - name: Name the system call when the worker sandbox's filter killed a grant worker
+        if: failure()
+        run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
       - run: node scripts/native-package.mjs debug
       - run: pnpm --filter @countersign/companion exec electron-builder --dir --publish never
       - name: Choose the last identity and compare it to the upstream TLS peer

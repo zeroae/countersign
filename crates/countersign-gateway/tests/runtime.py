@@ -12,6 +12,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -178,7 +179,7 @@ def server(addr, handler, tls):
         thread.join()
 
 
-def do_test(dir, binary, ip,site, broker, identities, ca, shared):
+def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False):
     host = f'site.test:{site.server_port}'
     broker.host = host
     broker.accounts = {}
@@ -226,8 +227,24 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared):
     # Override /etc/hosts only for the Gateway parent. Grant workers are then
     # isolated by the production launcher and receive only preconnected streams.
     library = os.environ.get('NSS_WRAPPER_LIBRARY') or str(next(Path('/usr/lib').glob('*/libnss_wrapper.so')))
-    with subprocess.Popen([binary,'serve',str(dir/'config.json')],
+    with subprocess.Popen([binary,'serve',str(dir/'config.json')], stderr=subprocess.PIPE, text=True,
                           env={**os.environ,'LD_PRELOAD':library,'NSS_WRAPPER_HOSTS':str(hosts)}) as child:
+        log = []
+        logged = threading.Condition()
+        def follow():
+            for line in child.stderr:
+                sys.stderr.write(line)
+                with logged:
+                    log.append(line.rstrip('\n'))
+                    logged.notify_all()
+        threading.Thread(target=follow, daemon=True).start()
+        def wait_for_log(pattern, timeout=4):
+            with logged:
+                return logged.wait_for(lambda: any(re.fullmatch(pattern, line) for line in log), timeout)
+        def descendants(pid):
+            child_list = Path(f'/proc/{pid}/task/{pid}/children')
+            direct = [int(c) for c in child_list.read_text().split()]
+            return direct + [p for c in direct for p in descendants(c)]
         try:
             for _ in range(100):
                 if child.poll() is not None:
@@ -239,6 +256,9 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared):
                     threading.Event().wait(.05)
             else:
                 raise RuntimeError('Gateway did not start')
+            # Startup names the worker sandbox and every layer its probe worker applied.
+            assert wait_for_log(r'Gateway worker sandbox "namespaces": namespaces, non-dumpable, '
+                                r'Landlock (ABI v[1-9]\d*|unavailable), seccomp allow-list'), log
             def request(user,extra=(),path='/', timeout=8):
                 args=['curl','--silent','--show-error','--fail','--max-time',str(timeout),'--noproxy','','--proxy',proxy,
                       '--proxy-cacert',str(dir/'ca.pem'),'--cacert',str(pub)]
@@ -246,6 +266,19 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared):
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
                 return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=timeout+2)
             users = list(identities) if shared else ['alice']
+            if filter_kill:
+                # Only Alice's grant worker runs. A grant worker the allow-list
+                # kills dies of SIGSYS, so deliver that signal to it: the
+                # supervisor cannot tell the two apart.
+                assert request('alice').returncode == 0
+                leaves = [pid for pid in descendants(child.pid) if not descendants(pid)]
+                assert len(leaves) == 1, leaves
+                os.kill(leaves[0], signal.SIGSYS)
+                assert wait_for_log(r"Gateway grant worker killed by the worker sandbox's filter \(SIGSYS\); "
+                                    r'grant fenced'), log
+                assert request('alice').returncode != 0, 'A grant whose worker the filter killed was served again'
+                assert request('bob').returncode == 0, "Alice's killed grant worker affected Bob"
+                return
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(users)) as pool:
                 results = list(pool.map(request,users))
             for user,res in zip(users,results):
@@ -271,10 +304,6 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared):
                     # The only grant belongs to Alice. Stop all of this launcher's
                     # descendants, including the worker. Both network relays must
                     # still enforce cutoff, without help from any child process.
-                    def descendants(pid):
-                        child_list = Path(f'/proc/{pid}/task/{pid}/children')
-                        direct = [int(c) for c in child_list.read_text().split()]
-                        return direct + [p for c in direct for p in descendants(c)]
                     workers = descendants(child.pid)
                     assert workers, 'isolated worker missing'
                     for pid in workers:
@@ -341,6 +370,8 @@ def main():
             for shared in (False,True):
                 do_test(dir,binary,ip,site,broker,identities,ca,shared)
                 print(('shared' if shared else 'sidecar')+' Gateway mTLS passed')
+            do_test(dir,binary,ip,site,broker,identities,ca,True,filter_kill=True)
+            print('filter-killed grant worker fenced')
 
 
 if __name__ == '__main__':
