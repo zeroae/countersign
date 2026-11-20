@@ -8,8 +8,8 @@ permissions:
   contents: read
 jobs:
   gateway-arm64:
-    # The seccomp allow-list is written per architecture, so the grant worker
-    # is exercised on arm64 as well as on the x86-64 job below.
+    # The seccomp allow-list is written per architecture. On x86-64 the
+    # containment test runs in ci.yml and the runtime test in the job below.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -25,8 +25,9 @@ jobs:
             bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true
           fi
       - uses: Swatinem/rust-cache@v2
-      - run: pip install -r examples/demo-integrator/test/fixture-requirements.txt
+      - run: pip install cryptography==50.0.2
       - run: cargo test --locked -p countersign-gateway
+      - run: cargo build --locked -p countersign-gateway
       - name: Exercise shared and sidecar workers and lease cutoff
         run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
       - name: Name the system call when the worker sandbox's filter killed a grant worker
