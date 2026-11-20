@@ -100,10 +100,20 @@ class Site(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'x')
             self.server.slow_started.set()
             self.connection.settimeout(25)
+            # Any end of the upstream leg counts as cutoff; only a read that
+            # times out with the leg still open does not. A leg the Gateway has
+            # closed can end here as an empty read, a reset, a TLS EOF or a
+            # broken pipe: on 2026-11-20, on an aarch64 host (Linux 6.17,
+            # Python 3.13) under load, recv raised BrokenPipeError on 4 of 10
+            # runs about 1 ms after a retirement notice, and catching only the
+            # first three made the retirement cutoff check fail by chance (#29).
             try:
-                if not self.connection.recv(1):
-                    self.server.cutoff.set()
-            except (ConnectionResetError, ssl.SSLEOFError):
+                ended = not self.connection.recv(1)
+            except TimeoutError:
+                ended = False
+            except OSError:  # ssl.SSLError is an OSError too
+                ended = True
+            if ended:
                 self.server.cutoff.set()
             return
         self.send_response(200)
