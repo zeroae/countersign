@@ -2,9 +2,11 @@
 // are server-side. A fresh random login secret is provisioned for each demo.
 import https from 'node:https';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { watchFile } from 'node:fs';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { contentSecurityPolicy, files, manifest } from './site-files.js';
+import { jobApproval } from './job-approval.js';
 
 const env = process.env;
 const secrets = env.DEMO_SECRETS || '/demo';
@@ -32,21 +34,24 @@ async function broker(path, body) {
 }
 
 // Pass through only the fields the job page shows.
-async function lastJob() {
-  const job=await readFile(jobFile,'utf8').then(JSON.parse,()=>null);
+function lastJob(raw) {
+  let job=null;
+  try { job=JSON.parse(raw); } catch { /* no result yet */ }
   if(!job||typeof job.url!=='string')return null;
   const text=v=>typeof v==='string'?v.slice(0,512):null;
   return {url:text(job.url),ok:job.ok===true,http_status:Number.isInteger(job.http_status)?job.http_status:null,
     fingerprint:text(job.fingerprint),subject:text(job.subject),error:text(job.error)};
 }
 
-// The Workload's current approval for the host, the one its traffic uses;
-// null when it has none or the Broker can't answer, so the job's own result
-// still shows. The lookup never creates an approval.
-async function currentApproval() {
-  try { return await broker('approvals/current',{binding,host}); }
-  catch { return null; }
-}
+// The approval each job ran under: the Workload's current approval for the
+// host when the launcher records the job's result. The lookup never creates
+// an approval; a failed lookup leaves the result shown without one.
+const jobs=jobApproval({
+  read:()=>readFile(jobFile,'utf8').catch(()=>null),
+  current:()=>broker('approvals/current',{binding,host}),
+  status:id=>broker('status',{user:workload.user,id}),
+});
+watchFile(jobFile,{interval:1000},()=>void jobs.landed().catch(()=>{})).unref();
 
 async function issueToken() {
   const path=env.WORKLOAD_TOKEN_FILE;
@@ -106,7 +111,7 @@ const server=https.createServer({ca,cert,key,maxHeaderSize:8192},async (req,res)
       case '/api/revoke':result=await broker('revoke',{user:workload.user,id:body.id});break;
       case '/api/devices':result=await broker('devices',{user:workload.user});break;
       case '/api/forget':result=await broker('pairings/forget',{user:workload.user,targets:body.targets});break;
-      case '/api/job':result={result:await lastJob(),approval:await currentApproval()};break;
+      case '/api/job':{const {text,approval}=await jobs.forJob();result={result:lastJob(text),approval};break;}
       case '/api/subscribe':result=await broker('push/subscribe',{user:workload.user,subscription:body.subscription});break;
       case '/api/logout':
         if(body.endpoint)await broker('push/unsubscribe',{user:workload.user,endpoint:body.endpoint});
