@@ -325,7 +325,8 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 # Only Alice's grant worker runs. A grant worker the allow-list
                 # kills dies of SIGSYS, so deliver that signal to it: the
                 # supervisor cannot tell the two apart.
-                assert request('alice').returncode == 0
+                first = request('alice')
+                assert first.returncode == 0, first.stderr
                 if sandbox == 'filter':
                     launched_directly()
                 leaves = [pid for pid in descendants(child.pid) if not descendants(pid)]
