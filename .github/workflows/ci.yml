@@ -27,6 +27,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: rustup show
+      - name: Pre-commit hook tests
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p 'test_git_hooks.py'
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - run: cargo fmt --all -- --check
