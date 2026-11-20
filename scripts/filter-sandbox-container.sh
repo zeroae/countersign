@@ -67,3 +67,18 @@ inside filter "${runtime[@]}" --worker-sandbox filter
 
 echo '== The namespace sandbox fails at startup with the named error'
 inside namespaces "${runtime[@]}" --worker-sandbox namespaces --startup-fails
+
+# The other direction. This one container leaves Docker's default profile for
+# one that refuses a single call of the Landlock layer and allows the rest, in
+# the image that has bubblewrap: the filter sandbox has to fail by name there,
+# and not start grant workers some other way.
+echo '== The filter sandbox fails at startup with the named error'
+profile=$(mktemp)
+trap 'rm -f "$profile"' EXIT
+cat >"$profile" <<'EOF'
+{"defaultAction": "SCMP_ACT_ALLOW",
+ "syscalls": [{"names": ["landlock_restrict_self"], "action": "SCMP_ACT_ERRNO", "errnoRet": 22}]}
+EOF
+docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:$PWD:ro" --workdir "$PWD" \
+  --security-opt "seccomp=$profile" countersign-filter-sandbox:namespaces \
+  "${runtime[@]}" --worker-sandbox filter --startup-fails

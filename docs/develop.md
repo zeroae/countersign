@@ -31,7 +31,7 @@ For the graphics and network path, run the [demo walkthrough](try.md) with `--ve
 
 The worker sandbox's filter kills a grant worker with `SIGSYS` when it makes a system call outside the allow-list, or a listed call with an argument the list refuses. One call is the exception: `clone3` fails as unsupported and kills nothing. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
 
-The kernel writes an audit line for each filter kill, under either worker sandbox. To run the Gateway's tests under the filter sandbox on a host that refuses namespaces, run `scripts/filter-sandbox-container.sh`, which needs Docker: it runs the containment test and the runtime test in a container under Docker's default security profile, as the end-to-end workflow's `gateway-filter-sandbox` job does. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
+The kernel writes an audit line for each filter kill, under either worker sandbox. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
 
 ```sh
 journalctl -k | grep type=1326
@@ -44,6 +44,8 @@ kernel: audit: type=1326 audit(1795144504.852:6342): ... pid=2188053 comm="worke
 `sig=31` is `SIGSYS`, `syscall=` is the number of the call and `arch=` the architecture that number belongs to: `c000003e` is x86-64 and `c00000b7` is arm64. The line above is not a grant worker's. It comes from the containment test in `crates/countersign-gateway/tests/worker_sandbox.rs`, which has the filter kill a process on purpose many times in each run, and `comm="worker_sandbox-"` marks every such line. Leave those out: a grant worker's line names another `comm` and `exe`.
 
 In CI the same lines come from `sudo dmesg`, which the CI and end-to-end workflows print when a run fails, in the step "Name the system call when the worker sandbox's filter killed a grant worker". A host that runs the audit daemon, `auditd`, sends these lines to `/var/log/audit/audit.log` and keeps them out of the journal.
+
+To run the Gateway's tests under the filter sandbox on a host that refuses namespaces, run `scripts/filter-sandbox-container.sh`, which needs Docker. It runs the containment test and the runtime test in a container under Docker's default security profile, as the end-to-end workflow's `gateway-filter-sandbox` job does.
 
 When the number is not enough, trace the Gateway. The runtime test takes the Gateway executable as its argument, so give it a wrapper that starts the real one under `strace`. Besides `strace`, the test needs what its first lines list: bubblewrap, libnss-wrapper, curl and Python's `cryptography`. From the checkout root:
 
