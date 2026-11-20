@@ -29,7 +29,7 @@ For the graphics and network path, run the [demo walkthrough](try.md) with `--ve
 
 ## A grant worker died of SIGSYS
 
-A grant worker that makes a system call outside the worker sandbox's allow-list is killed by the kernel with `SIGSYS`. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
+The worker sandbox's filter kills a grant worker with `SIGSYS` when it makes a system call outside the allow-list, or a listed call with an argument the list refuses. One call is the exception: `clone3` fails as unsupported and kills nothing. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
 
 The kernel writes an audit line for each filter kill. Reading it needs no root where your user can read the system journal, as members of `adm` or `systemd-journal` can.
 
@@ -38,12 +38,14 @@ journalctl -k | grep type=1326
 ```
 
 ```text
-kernel: audit: type=1326 audit(1795144504.852:6342): ... pid=2188053 comm="worker_sandbox-" exe="..." sig=31 arch=c00000b7 syscall=56 compat=0 ip=0xec5e8e3f07c4 code=0x80000000
+kernel: audit: type=1326 audit(1795144504.852:6342): ... pid=2188053 comm="worker_sandbox-" exe=".../target/debug/deps/worker_sandbox-dcf0f669f7f13f3c" sig=31 arch=c00000b7 syscall=56 compat=0 ip=0xec5e8e3f07c4 code=0x80000000
 ```
 
-`sig=31` is `SIGSYS`, `syscall=` is the number of the call and `arch=` the architecture that number belongs to: `c000003e` is x86-64 and `c00000b7` is arm64. In CI the same lines come from `sudo dmesg`, which the CI and end-to-end workflows print when a run fails, in the step "Name the system call when the worker sandbox's filter killed a grant worker".
+`sig=31` is `SIGSYS`, `syscall=` is the number of the call and `arch=` the architecture that number belongs to: `c000003e` is x86-64 and `c00000b7` is arm64. The line above is not a grant worker's. It comes from the containment test in `crates/countersign-gateway/tests/worker_sandbox.rs`, which has the filter kill a process on purpose many times in each run, and `comm="worker_sandbox-"` marks every such line. Leave those out: a grant worker's line names another `comm` and `exe`.
 
-When the number is not enough, trace the Gateway. The runtime test takes the Gateway executable as its argument, so give it a wrapper that starts the real one under `strace`:
+In CI the same lines come from `sudo dmesg`, which the CI and end-to-end workflows print when a run fails, in the step "Name the system call when the worker sandbox's filter killed a grant worker". A host that runs the audit daemon, `auditd`, sends these lines to `/var/log/audit/audit.log` and keeps them out of the journal.
+
+When the number is not enough, trace the Gateway. The runtime test takes the Gateway executable as its argument, so give it a wrapper that starts the real one under `strace`. Besides `strace`, the test needs what its first lines list: bubblewrap, libnss-wrapper, curl and Python's `cryptography`. From the checkout root:
 
 ```sh
 cat > /tmp/traced-gateway <<'EOF'
@@ -51,21 +53,23 @@ cat > /tmp/traced-gateway <<'EOF'
 exec strace -D -f -o "/tmp/gateway-trace.$$" "$PWD/target/debug/countersign-gateway" "$@"
 EOF
 chmod +x /tmp/traced-gateway
-python crates/countersign-gateway/tests/runtime.py /tmp/traced-gateway
+python3 crates/countersign-gateway/tests/runtime.py /tmp/traced-gateway
 ```
 
-The wrapper runs `strace -D -f -o <file> target/debug/countersign-gateway serve <config>` for each Gateway the test starts, one trace file per Gateway. `-f` follows the Gateway into its grant workers. `-D` matters: the sidecar part of the runtime test stops every descendant of the Gateway, and without `-D` the tracer is one of them, so the Gateway it traces stops too and the test hangs. With `-D` the tracer detaches from the Gateway's process tree. In each trace file, search for `+++ killed by SIGSYS +++`. The line above it with the same process ID is the call the filter killed; ignore the result `strace` prints for it. Tracing slows the Gateway, so one of the test's timing assertions can fail under it. The trace up to that point is still complete.
+The wrapper runs `strace -D -f -o <file> target/debug/countersign-gateway serve <config>` for each Gateway the test starts, one trace file per Gateway. `-f` follows the Gateway into its grant workers. `-D` matters: the sidecar part of the runtime test stops every descendant of the process it started. Without `-D` that process is `strace` and the Gateway is its child, so the test stops the Gateway and hangs. With `-D` the Gateway is the process the test started, and the tracer runs outside its process tree. Tracing slows the Gateway, so one of the test's timing assertions can fail under it. The trace up to that point is still complete.
 
-The same number is a different call on each architecture, so map it with the architecture from the audit line. `ausyscall`, from the `auditd` package, takes both:
+In each trace file, search for `+++ killed by SIGSYS +++`. A filter kill ends every thread of the grant worker, so the file has one such line for each thread, and for most of them the line above is an allowed call the thread was waiting in. Look in the lines before the first of them for the call the audit line named. The trace shows its arguments and what the grant worker did before it; ignore the result `strace` prints for it. The last Gateway the test starts has one grant worker the test itself kills, marked `--- SIGSYS {si_signo=SIGSYS, si_code=SI_USER, ...} ---`. That one is not a filter kill.
+
+The same number is a different call on each architecture, so map it with the architecture from the audit line. `ausyscall` takes both:
 
 ```sh
 ausyscall aarch64 56   # openat
 ausyscall x86_64 56    # clone
 ```
 
-Without it, read the kernel's `unistd.h` for the architecture: `/usr/include/x86_64-linux-gnu/asm/unistd_64.h` on x86-64 and `/usr/include/asm-generic/unistd.h` on arm64, where `grep -w 56` finds `#define __NR_openat 56`. Read the header that matches the architecture of the killed worker, not of the machine you are reading on.
+`ausyscall` comes in the `auditd` package, and installing that starts the audit daemon, which takes the audit lines out of the journal as above. Without it, read the kernel's table for the architecture of the killed grant worker, which need not be the machine you are reading on: [`syscall_64.tbl`](https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl) for x86-64 and [`asm-generic/unistd.h`](https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/unistd.h) for arm64. A host of the same architecture has it installed, as `/usr/include/x86_64-linux-gnu/asm/unistd_64.h` on x86-64 and `/usr/include/asm-generic/unistd.h` on arm64, where `grep -w 56` finds `#define __NR_openat 56`.
 
-A call a grant worker needs goes in the allow-list in `crates/countersign-gateway/src/worker_sandbox.rs`, with the reason beside it as a comment: `ALLOWED` for a call allowed whatever its arguments, or the argument-checked list below it. A call the worker should not make is a bug in the worker, not a gap in the list.
+A call a grant worker needs goes in the allow-list in `crates/countersign-gateway/src/worker_sandbox.rs`, with the reason beside it as a comment: `ALLOWED` for a call allowed whatever its arguments, or `conditional`, in `allow_list`, for a call allowed only with certain arguments. When the killed call is already in `conditional`, an argument failed its test, and the trace shows which. A call a grant worker should not make is a bug in the grant worker, not a gap in the list.
 
 ## Install with conda on Linux
 
