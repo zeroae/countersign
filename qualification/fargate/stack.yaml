@@ -1,0 +1,149 @@
+# The Fargate qualification harness: where run.sh runs the Gateway's two test
+# seams on real ECS Fargate, on x86-64 and arm64. It is a qualification tool,
+# and the Gateway never depends on it. Deleting the stack removes every
+# resource, images included. run.sh deploys and deletes it.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Countersign Fargate qualification harness (zeroae/countersign#24). Not product infrastructure.
+
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref AWS::StackName
+      EmptyOnDelete: true
+
+  # A small public network with no NAT: a task needs egress only, to pull its
+  # image and write its log.
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/24
+      Tags: [{ Key: Name, Value: !Ref AWS::StackName }]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.0.0/25
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  SubnetRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet
+      RouteTableId: !Ref RouteTable
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Qualification task, egress only (image pull and logs)
+      VpcId: !Ref Vpc
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}"
+      RetentionInDays: 30
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+
+  # Named and bounded as the zeroae-code power-user SSO roles require.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "PowerUserPB-${AWS::StackName}-exec"
+      PermissionsBoundary: arn:aws:iam::aws:policy/PowerUserAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # Fargate defaults throughout: the image's own non-root user, no added
+  # capability, Fargate's own seccomp profile and no task role. That is what an
+  # operator's task gets. One vCPU, because the runtime test waits on the
+  # Gateway with timeouts sized for a CI runner.
+  TaskDefinitionX8664:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-x86_64"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: qualify
+          Image: !Sub "${Repository.RepositoryUri}:x86_64"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: x86_64
+
+  TaskDefinitionArm64:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-arm64"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: ARM64
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: qualify
+          Image: !Sub "${Repository.RepositoryUri}:arm64"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: arm64
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  Cluster:
+    Value: !Ref Cluster
+  Subnet:
+    Value: !Ref Subnet
+  SecurityGroup:
+    Value: !Ref SecurityGroup
+  LogGroup:
+    Value: !Ref LogGroup
+  TaskDefinitionX8664:
+    Value: !Ref TaskDefinitionX8664
+  TaskDefinitionArm64:
+    Value: !Ref TaskDefinitionArm64
