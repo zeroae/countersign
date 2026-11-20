@@ -118,6 +118,7 @@ impl Gateway {
                 return Err(Capacity.into());
             }
             let (fence, closed) = watch::channel(false);
+            let (process, exit) = ChildHandle::launch()?;
             let slot = Slot {
                 fence,
                 requests: Arc::new(Semaphore::new(32)),
@@ -128,11 +129,12 @@ impl Gateway {
                     .unwrap_or_else(|| Arc::new(Semaphore::new(128))),
                 binding: grant.clone(),
                 expires: activate.expires_at_ms,
-                process: Some(ChildHandle::launch()?),
+                process: Some(process),
                 connections: Arc::new(Semaphore::new(32)),
                 handshakes: Arc::new(Semaphore::new(4)),
             };
             children.insert(grant.grant.clone(), slot);
+            tokio::spawn(self.clone().watch_worker(grant.clone(), exit));
             tokio::spawn(self.clone().watch_retirement(
                 grant.clone(),
                 credential.clone(),
@@ -175,6 +177,23 @@ impl Gateway {
         {
             slot.fence.send_replace(true);
             slot.process.take(); // kill-on-drop, reaped asynchronously
+        }
+    }
+
+    /// A grant worker that ends on its own, whatever the cause, has failed:
+    /// its grant is fenced and needs fresh approval.
+    async fn watch_worker(self: Arc<Self>, grant: GrantBinding, exit: worker::Exit) {
+        // An error means the supervisor stopped the grant worker itself.
+        if let Ok(status) = exit.await {
+            let id = grant.grant.as_str();
+            if worker::killed_by_filter(status) {
+                eprintln!(
+                    "Gateway grant {id}: grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced"
+                );
+            } else {
+                eprintln!("Gateway grant {id}: grant worker ended ({status}); grant fenced");
+            }
+            self.fence(&grant);
         }
     }
 
@@ -832,10 +851,19 @@ async fn proxy<T: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         .await;
 }
 
-pub async fn run(args: &[String]) -> Result<()> {
-    if args == ["grant-worker"] {
-        return worker::serve();
+/// A grant worker's whole life: it confines itself, then serves its grant.
+pub fn grant_worker() -> Result<()> {
+    match countersign_gateway::worker_sandbox::confine() {
+        Ok(layers) => worker::serve(layers),
+        Err(error) => {
+            // The startup probe passes this on: the layer, then the cause.
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
     }
+}
+
+pub async fn run(args: &[String]) -> Result<()> {
     let [verb, path] = args else {
         return Err(invalid("usage: countersign-gateway serve|env CONFIG.json"));
     };
@@ -847,7 +875,8 @@ pub async fn run(args: &[String]) -> Result<()> {
     if verb != "serve" {
         return Err(invalid("unrecognized Gateway command"));
     }
-    ChildHandle::verify_environment().await?;
+    let layers = ChildHandle::verify_environment().await?;
+    eprintln!("Gateway worker sandbox \"namespaces\": namespaces, {layers}");
     let policy = config.policy()?;
     let broker = Broker::new(&config)?;
     let (issuer, tls) = if let Some(shared) = &config.shared {

@@ -7,6 +7,32 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  gateway-arm64:
+    # The seccomp allow-list is written per architecture. On x86-64 the
+    # containment test runs in ci.yml and the runtime test in the job below.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y apparmor-profiles bubblewrap libnss-wrapper
+      - name: Enable the distribution's bubblewrap profile when the host restricts user namespaces
+        run: |
+          if ! bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true; then
+            sudo apparmor_parser --replace /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+            bwrap --unshare-all --cap-drop ALL --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /usr/bin/true
+          fi
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install cryptography==50.0.2
+      - run: cargo test --locked -p countersign-gateway
+      - run: cargo build --locked -p countersign-gateway
+      - name: Exercise shared and sidecar workers and lease cutoff
+        run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
+      - name: Name the system call when the worker sandbox's filter killed a grant worker
+        if: failure()
+        run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
   curl:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -32,6 +58,9 @@ jobs:
       - run: cargo build --locked --workspace
       - name: Exercise shared and sidecar workers and lease cutoff
         run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
+      - name: Name the system call when the worker sandbox's filter killed a grant worker
+        if: failure()
+        run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
       - run: node scripts/native-package.mjs debug
       - run: pnpm --filter @countersign/companion exec electron-builder --dir --publish never
       - name: Choose the last identity and compare it to the upstream TLS peer
