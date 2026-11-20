@@ -27,7 +27,7 @@ pnpm test
 
 ### The pre-commit hook
 
-A tracked pre-commit hook, `.githooks/pre-commit`, runs fast checks on what you stage. It refuses a commit when a staged Rust file is not formatted as `cargo fmt` would format it, and when a staged JavaScript file (`.js`, `.mjs`, `.cjs`) fails ESLint. It checks the staged copy of each file, not the one in your working tree. When `node_modules` is missing it skips ESLint and says so. It finishes in well under a second. It runs no build, no test suite and no network call. Clippy, the test suites and the runtime test run in CI, as listed above.
+A tracked pre-commit hook, `.githooks/pre-commit`, runs fast checks on what you stage. It refuses a commit when a staged Rust file is not formatted as `cargo fmt` would format it, and when a staged JavaScript file that `pnpm lint` covers fails ESLint: the packages' `src` and `test` folders and the demo Integrator. It checks the staged copy of each file, not the one in your working tree. When `node_modules` is missing it skips ESLint and says so. It finishes in well under a second. It runs no build, no test suite and no network call. Clippy, the test suites and the Gateway's runtime test run in the [CI workflow](https://github.com/zeroae/countersign/blob/main/.github/workflows/ci.yml) and the end-to-end workflow.
 
 A Claude session installs the hook when it starts, through the `SessionStart` hook in `.claude/settings.json`. Without Claude, install it once per clone from the checkout root:
 
@@ -35,7 +35,7 @@ A Claude session installs the hook when it starts, through the `SessionStart` ho
 scripts/install-git-hooks.sh
 ```
 
-The script sets `core.hooksPath` to `.githooks`. That setting covers every worktree of the clone, and each worktree runs its own tracked copy of the hook. If `core.hooksPath` already points elsewhere, the script leaves it as it is and says so. To skip the hook for one commit, run `git commit --no-verify`. Its tests are in `scripts/test_git_hooks.py`:
+The script sets `core.hooksPath` to `.githooks`. That setting covers every worktree of the clone, and each worktree runs its own tracked copy of the hook. If `core.hooksPath` already points elsewhere, or the clone's `.git/hooks` folder holds hooks of its own, which `core.hooksPath` would stop running, the script changes nothing and says so. To skip the hook for one commit, run `git commit --no-verify`. The tests for the hook and the script are in `scripts/test_git_hooks.py`:
 
 ```sh
 python3 -m unittest discover -s scripts -p 'test_git_hooks.py'

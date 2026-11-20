@@ -89,13 +89,17 @@ class GitHooksTests(unittest.TestCase):
             outputs.append(result.stdout + result.stderr)
         return "".join(outputs)
 
-    def commit(self, files, env=None):
+    def stage(self, files):
         for name, text in files.items():
             path = self.worktree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
         run(["git", "add", "--", *files], self.worktree)
-        return run(["git", "commit", "-q", "-m", "change"], self.worktree, env=env, check=False)
+
+    def commit(self, files, env=None, prefix=()):
+        self.stage(files)
+        args = [*prefix, "git", "commit", "-q", "-m", "change"]
+        return run(args, self.worktree, env=env, check=False)
 
     def test_fresh_worktree_refuses_unformatted_rust_after_session_start(self):
         self.start_session(self.worktree)
@@ -125,17 +129,36 @@ class GitHooksTests(unittest.TestCase):
     def test_hook_refuses_javascript_that_fails_eslint(self):
         self.start_session(self.worktree)
         self.link_node_modules()
-        result = self.commit({"scripts/bad.mjs": "undefinedName();\n"})
+        result = self.commit({"packages/widget/src/bad.js": "undefinedName();\n"})
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("no-undef", result.stderr)
-        run(["git", "rm", "-q", "--cached", "scripts/bad.mjs"], self.worktree)
-        self.assertEqual(self.commit({"scripts/good.mjs": "export const x = 1;\n"}).returncode, 0)
+        run(["git", "rm", "-q", "--cached", "packages/widget/src/bad.js"], self.worktree)
+        good = self.commit({"packages/widget/src/good.js": "export const x = 1;\n"})
+        self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
+
+    def test_hook_lints_only_what_pnpm_lint_lints(self):
+        self.start_session(self.worktree)
+        self.link_node_modules()
+        for name in ["distribution/npm/launch.cjs", "scripts/tool.mjs", "crates/x/tests/addon.cjs"]:
+            with self.subTest(name=name):
+                result = self.commit({name: "undefinedName();\n"})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_hook_without_node_modules_skips_eslint_and_says_so(self):
         self.start_session(self.worktree)
-        result = self.commit({"scripts/bad.mjs": "undefinedName();\n"})
+        result = self.commit({"packages/widget/src/bad.js": "undefinedName();\n"})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("ESLint skipped", result.stderr)
+
+    def test_hook_names_a_pinned_toolchain_that_is_not_installed(self):
+        toolchain = self.worktree / "rust-toolchain.toml"
+        toolchain.write_text(toolchain.read_text().replace("1.99.0", "0.0.1"))
+        run(["git", "commit", "-q", "-am", "pin a missing toolchain"], self.worktree)
+        self.start_session(self.worktree)
+        result = self.commit({"src/lib.rs": FORMATTED})
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0.0.1", result.stderr)
+        self.assertIn("rustup show", result.stderr)
 
     def test_one_rust_and_one_markdown_file_commit_in_under_five_seconds(self):
         self.start_session(self.worktree)
@@ -159,6 +182,15 @@ class GitHooksTests(unittest.TestCase):
         hooks_path = run(["git", "config", "core.hooksPath"], self.main).stdout.strip()
         self.assertEqual(hooks_path, "/elsewhere")
 
+    def test_session_start_leaves_hooks_in_the_hooks_folder_alone(self):
+        hook = self.main / ".git/hooks/pre-push"
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        hook.chmod(0o755)
+        output = self.start_session(self.worktree)
+        self.assertIn("pre-push", output)
+        unset = run(["git", "config", "core.hooksPath"], self.main, check=False)
+        self.assertEqual(unset.stdout, "")
+
     def test_hook_runs_no_build_no_test_and_no_network(self):
         self.start_session(self.worktree)
         shims = self.tmp / "shims"
@@ -170,16 +202,11 @@ class GitHooksTests(unittest.TestCase):
             shim.chmod(0o755)
         env = git_env({"PATH": f"{shims}{os.pathsep}{os.environ['PATH']}"})
         trace = self.tmp / "trace"
-        files = {"src/lib.rs": FORMATTED, "NOTES.md": "# Notes\n"}
-        for name, text in files.items():
-            path = self.worktree / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        run(["git", "add", "--", *files], self.worktree)
-        args = ["git", "commit", "-q", "-m", "change"]
+        prefix = ()
         if shutil.which("strace"):
-            args = ["strace", "-f", "-qq", "-e", "trace=connect", "-o", str(trace), *args]
-        result = run(args, self.worktree, env=env, check=False)
+            prefix = ("strace", "-f", "-qq", "-e", "trace=connect", "-o", str(trace))
+        files = {"src/lib.rs": FORMATTED, "NOTES.md": "# Notes\n"}
+        result = self.commit(files, env=env, prefix=prefix)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
         if trace.exists():

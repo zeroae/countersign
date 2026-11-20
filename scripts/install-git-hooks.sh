@@ -3,7 +3,9 @@
 # the clone's shared config, so one run covers every worktree, and a relative
 # path makes each worktree run its own tracked copy of the hooks.
 # A Claude session runs this at start (.claude/settings.json). It prints nothing
-# when the hooks are already installed, and never replaces another hooks path.
+# when the hooks are already installed. It never replaces another hooks path,
+# and never hides hooks already in the clone's hooks folder, which core.hooksPath
+# would stop running.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -13,6 +15,12 @@ current=$(git config --get core.hooksPath || true)
 case "$current" in
   .githooks) ;;
   "")
+    hooks=$(git rev-parse --path-format=absolute --git-common-dir)/hooks
+    existing=$(find "$hooks" -maxdepth 1 -type f ! -name '*.sample' -exec basename {} \; 2>/dev/null | sort | tr '\n' ' ')
+    if [ -n "$existing" ]; then
+      echo "$hooks holds hooks (${existing% }) that core.hooksPath would stop running, so the pre-commit hook in .githooks/ is not installed. Move them into .githooks/ or elsewhere, then run scripts/install-git-hooks.sh." >&2
+      exit 0
+    fi
     git config core.hooksPath .githooks
     echo "Installed the pre-commit hook: core.hooksPath is now .githooks."
     ;;
