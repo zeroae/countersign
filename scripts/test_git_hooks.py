@@ -183,13 +183,21 @@ class GitHooksTests(unittest.TestCase):
         self.assertEqual(hooks_path, "/elsewhere")
 
     def test_session_start_leaves_hooks_in_the_hooks_folder_alone(self):
-        hook = self.main / ".git/hooks/pre-push"
-        hook.write_text("#!/bin/sh\nexit 0\n")
-        hook.chmod(0o755)
-        output = self.start_session(self.worktree)
-        self.assertIn("pre-push", output)
-        unset = run(["git", "config", "core.hooksPath"], self.main, check=False)
-        self.assertEqual(unset.stdout, "")
+        target = self.tmp / "managed-hook"
+        target.write_text("#!/bin/sh\nexit 0\n")
+        target.chmod(0o755)
+        for kind in ["file", "symlink"]:
+            with self.subTest(kind=kind):
+                hook = self.main / ".git/hooks/pre-push"
+                hook.unlink(missing_ok=True)
+                if kind == "file":
+                    shutil.copy2(target, hook)
+                else:
+                    hook.symlink_to(target)
+                output = self.start_session(self.worktree)
+                self.assertIn("pre-push", output)
+                unset = run(["git", "config", "core.hooksPath"], self.main, check=False)
+                self.assertEqual(unset.stdout, "")
 
     def test_hook_runs_no_build_no_test_and_no_network(self):
         self.start_session(self.worktree)
