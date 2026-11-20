@@ -118,8 +118,16 @@ fn landlock() -> io::Result<Landlock> {
         )
     }) {
         Ok(abi) => abi.min(LANDLOCK_ABI.into()) as u8,
-        // Not built into the kernel, or disabled at boot (landlock(7)).
-        Err(error) if matches!(error.raw_os_error(), Some(libc::ENOSYS | libc::EOPNOTSUPP)) => {
+        // Not built into the kernel, disabled at boot (landlock(7)), or denied
+        // by a container profile older than Landlock, which answers EPERM.
+        // Only this query may be refused: once the kernel has named an ABI, a
+        // failure to apply it is an error.
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::ENOSYS | libc::EOPNOTSUPP | libc::EPERM)
+            ) =>
+        {
             return Ok(Landlock::Unavailable);
         }
         Err(error) => return Err(error),

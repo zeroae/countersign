@@ -42,6 +42,8 @@ mod linux {
     const CONFINED: &str = "confined";
     const NO_LANDLOCK: &str = "no-landlock";
     const LANDLOCK_REFUSED: &str = "landlock-refused";
+    /// A container profile older than Landlock answers its calls this way.
+    const LANDLOCK_DENIED: &str = "landlock-denied";
     /// Docker's default profile answers `clone3` this way, and the C library
     /// then starts threads with `clone`.
     const NO_CLONE3: &str = "no-clone3";
@@ -88,6 +90,7 @@ mod linux {
         match setup {
             NO_LANDLOCK => fail_with(libc::SYS_landlock_create_ruleset, libc::ENOSYS),
             LANDLOCK_REFUSED => fail_with(libc::SYS_landlock_restrict_self, libc::EPERM),
+            LANDLOCK_DENIED => fail_with(libc::SYS_landlock_create_ruleset, libc::EPERM),
             NO_CLONE3 => fail_with(libc::SYS_clone3, libc::ENOSYS),
             _ => assert_eq!(setup, CONFINED),
         }
@@ -586,6 +589,22 @@ mod linux {
                 );
             }
         }),
+        (
+            "a_host_that_denies_landlock_is_reported_as_without_it_and_still_confined",
+            || {
+                let stand_in = StandIn::start(LANDLOCK_DENIED);
+                assert_eq!(
+                    stand_in.layers,
+                    "non-dumpable, Landlock unavailable, seccomp allow-list"
+                );
+                each_of_two(
+                    LANDLOCK_DENIED,
+                    |_| "open /".into(),
+                    Outcome::refused,
+                    "a refusal",
+                );
+            },
+        ),
         ("a_layer_the_host_refuses_fails_confinement_by_name", || {
             let output = Command::new(std::env::current_exe().unwrap())
                 .env_clear()
