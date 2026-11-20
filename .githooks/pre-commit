@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Fast checks on the staged change only: rustfmt on staged Rust files and
+# ESLint on staged JavaScript. No build, no test suite and no network call;
+# CI runs those (docs/develop.md, "Run the checks").
+# Written for bash 3.2, the bash macOS ships.
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+status=0
+
+staged() {
+  git diff --cached --name-only -z --diff-filter=ACMR -- "$@"
+}
+
+# rustfmt reads each staged blob on stdin, so a file whose working copy differs
+# from what is staged is judged by what will be committed. `rustup run` never
+# installs a missing toolchain, where the plain proxy would download it.
+rustfmt_staged() {
+  if command -v rustup >/dev/null 2>&1; then
+    local channel
+    channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+    rustup run "$channel" rustfmt "$@"
+  else
+    rustfmt "$@"
+  fi
+}
+
+edition=$(sed -n 's/^edition *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+unformatted=()
+while IFS= read -r -d '' file; do
+  git show ":$file" >"$tmp/in"
+  if ! rustfmt_staged --edition "$edition" --emit stdout <"$tmp/in" >"$tmp/out" 2>"$tmp/err"; then
+    echo "pre-commit: rustfmt could not check $file:" >&2
+    cat "$tmp/err" >&2
+    status=1
+  elif ! cmp -s "$tmp/in" "$tmp/out"; then
+    unformatted+=("$file")
+  fi
+done < <(staged '*.rs')
+
+if [ ${#unformatted[@]} -gt 0 ]; then
+  echo "pre-commit: these staged Rust files are not formatted:" >&2
+  printf '  %s\n' "${unformatted[@]}" >&2
+  echo "Run 'cargo fmt --all', then 'git add' them again." >&2
+  status=1
+fi
+
+# ESLint lints files whose working copy matches the index in one run, and each
+# partly staged file from its staged blob on stdin.
+whole=()
+partial=()
+while IFS= read -r -d '' file; do
+  if git diff --quiet -- "$file"; then
+    whole+=("$file")
+  else
+    partial+=("$file")
+  fi
+done < <(staged '*.js' '*.mjs' '*.cjs')
+
+if [ $((${#whole[@]} + ${#partial[@]})) -gt 0 ]; then
+  eslint=node_modules/.bin/eslint
+  if [ ! -x "$eslint" ]; then
+    echo "pre-commit: ESLint skipped, no node_modules here; run 'pnpm install' to lint staged JavaScript. CI runs 'pnpm lint'." >&2
+  else
+    lint=0
+    if [ ${#whole[@]} -gt 0 ]; then
+      "$eslint" --no-warn-ignored -- "${whole[@]}" >&2 || lint=1
+    fi
+    for file in ${partial[@]+"${partial[@]}"}; do
+      git show ":$file" | "$eslint" --no-warn-ignored --stdin --stdin-filename "$file" >&2 || lint=1
+    done
+    if [ $lint -ne 0 ]; then
+      status=1
+      echo "Fix what ESLint reports ('pnpm lint' lints everything), then 'git add' the files again." >&2
+    fi
+  fi
+fi
+
+if [ $status -ne 0 ]; then
+  echo "pre-commit: commit refused. 'git commit --no-verify' skips this hook." >&2
+fi
+exit $status

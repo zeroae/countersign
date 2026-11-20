@@ -25,6 +25,22 @@ pnpm lint
 pnpm test
 ```
 
+### The pre-commit hook
+
+A tracked pre-commit hook, `.githooks/pre-commit`, runs fast checks on what you stage. It refuses a commit when a staged Rust file is not formatted as `cargo fmt` would format it, and when a staged JavaScript file (`.js`, `.mjs`, `.cjs`) fails ESLint. It checks the staged copy of each file, not the one in your working tree. When `node_modules` is missing it skips ESLint and says so. It finishes in well under a second. It runs no build, no test suite and no network call. Clippy, the test suites and the runtime test run in CI, as listed above.
+
+A Claude session installs the hook when it starts, through the `SessionStart` hook in `.claude/settings.json`. Without Claude, install it once per clone from the checkout root:
+
+```sh
+scripts/install-git-hooks.sh
+```
+
+The script sets `core.hooksPath` to `.githooks`. That setting covers every worktree of the clone, and each worktree runs its own tracked copy of the hook. If `core.hooksPath` already points elsewhere, the script leaves it as it is and says so. To skip the hook for one commit, run `git commit --no-verify`. Its tests are in `scripts/test_git_hooks.py`:
+
+```sh
+python3 -m unittest discover -s scripts -p 'test_git_hooks.py'
+```
+
 To run the Gateway's tests under the filter sandbox on a host that refuses namespaces, run `scripts/filter-sandbox-container.sh`, which needs Docker. It runs the containment test and the runtime test in a container under Docker's default security profile, as the end-to-end workflow's `gateway-filter-sandbox` job does. Its two last steps use a profile with one quirk each: where the host refuses the allow-list, the filter sandbox has to fail at startup by name, and where the kernel has no `close_range`, a grant worker still has to start with no descriptor of the supervisor's.
 
 That container has the CI runner's kernel. To run the same two tests on real ECS Fargate 1.4.0, x86-64 and arm64, use the qualification harness, `qualification/fargate/run.sh`. It needs our AWS account, and its [README](https://github.com/zeroae/countersign/blob/main/qualification/fargate/README.md) says how to deploy, run and tear it down. Run it for every release that touches the grant worker.

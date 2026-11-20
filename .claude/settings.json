@@ -3,5 +3,17 @@
     "foresight@foresight-vendored": true,
     "superpowers@foresight-vendored": false,
     "mattpocock-skills@foresight-vendored": false
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/install-git-hooks.sh"
+          }
+        ]
+      }
+    ]
   }
 }
