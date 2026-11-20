@@ -9,7 +9,7 @@ use rcgen::{
 use ring::rand::{SecureRandom, SystemRandom};
 use rustls_pki_types::CertificateDer;
 use thiserror::Error;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use x509_parser::certification_request::X509CertificationRequest;
 use x509_parser::cri_attributes::ParsedCriAttribute;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Version};
@@ -29,6 +29,16 @@ pub enum IssueError {
     #[error("cryptographic random source unavailable")]
     RandomUnavailable,
 }
+
+/// How long before it is issued a certificate's validity starts. A client
+/// validates with its own clock, and one that runs behind the Gateway's would
+/// otherwise find a fresh certificate not yet valid.
+///
+/// Why (2026-11-20): on ECS Fargate 1.4.0, kernel 6.1.190, curl in the
+/// Gateway's own task rejected a leaf issued within 10 ms after a second began.
+/// OpenSSL reads `time()`, which that kernel advances once per 10 ms tick, so
+/// it still showed the second before the leaf's `notBefore`.
+const CLIENT_CLOCK_ALLOWANCE: Duration = Duration::minutes(1);
 
 /// One freshly generated CA and an immutable snapshot of its destination policy.
 ///
@@ -57,7 +67,7 @@ impl SidecarIssuer {
         }
 
         let mut params = CertificateParams::default();
-        params.not_before = now;
+        params.not_before = now - CLIENT_CLOCK_ALLOWANCE;
         params.not_after = not_after;
         params.distinguished_name = DistinguishedName::new();
         params
@@ -124,7 +134,7 @@ pub(crate) fn sign_leaf(
     authority: &rcgen::Issuer<'_, KeyPair>,
 ) -> Result<CertificateDer<'static>, IssueError> {
     let mut params = CertificateParams::new(vec![origin.host().to_owned()])?;
-    params.not_before = now;
+    params.not_before = now - CLIENT_CLOCK_ALLOWANCE;
     params.not_after = not_after;
     params.distinguished_name = DistinguishedName::new();
     params.is_ca = IsCa::ExplicitNoCa;

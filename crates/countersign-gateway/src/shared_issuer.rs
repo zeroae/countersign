@@ -529,6 +529,10 @@ mod tests {
             .issue(&site.scope, &site.origin, site.deadline, &site.csr, "g/1")
             .await
             .unwrap();
+        // A client whose clock runs half a minute behind finds the leaf valid.
+        let (_, leaf) = x509_parser::parse_x509_certificate(&chain[0]).unwrap();
+        let behind = (OffsetDateTime::now_utc() - time::Duration::seconds(30)).unix_timestamp();
+        assert!(leaf.validity.not_before.timestamp() <= behind);
         site.tls(chain);
         fs::write(key, KeyPair::generate().unwrap().serialize_pem()).unwrap();
         assert!(SharedIssuer::open(source, site.policy).await.is_err());
