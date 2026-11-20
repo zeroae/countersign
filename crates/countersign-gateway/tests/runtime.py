@@ -100,10 +100,17 @@ class Site(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'x')
             self.server.slow_started.set()
             self.connection.settimeout(25)
+            # Any end of the upstream leg counts as cutoff; only a read that
+            # times out with the leg still open does not. Why (2026-11-20, #29):
+            # under load on an aarch64 host, recv on a leg the Gateway had
+            # closed raised BrokenPipeError on 4 of 10 runs.
             try:
-                if not self.connection.recv(1):
-                    self.server.cutoff.set()
-            except (ConnectionResetError, ssl.SSLEOFError):
+                ended = not self.connection.recv(1)
+            except TimeoutError:
+                ended = False
+            except OSError:  # ssl.SSLError is an OSError too
+                ended = True
+            if ended:
                 self.server.cutoff.set()
             return
         self.send_response(200)
