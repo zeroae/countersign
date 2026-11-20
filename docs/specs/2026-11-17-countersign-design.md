@@ -231,7 +231,7 @@ Deliver the slices together on one implementation branch and one pull request in
 
 ## Run the reference implementation
 
-The desktop can run on Linux, macOS or Windows. The Gateway requires Linux with bubblewrap and unprivileged user namespaces. The Broker uses a single owning process per SQLite database. Use Node 24, the repository’s pinned Rust toolchain, and pnpm 10.28.2. On Debian-family systems install the NSS development libraries before building the addon.
+The desktop can run on Linux, macOS or Windows. The Gateway requires Linux and one of two worker sandboxes, chosen by the operator: the namespace sandbox, which needs bubblewrap and unprivileged user namespaces, or the filter sandbox, for hosts that refuse namespaces (ADR 0001). The Broker uses a single owning process per SQLite database. Use Node 24, the repository’s pinned Rust toolchain, and pnpm 10.28.2. On Debian-family systems install the NSS development libraries before building the addon.
 
 ```sh
 pnpm install --frozen-lockfile

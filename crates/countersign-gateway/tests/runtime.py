@@ -1,7 +1,10 @@
 """Exercise real Linux Gateway processes against a test-only grant authority and mTLS site.
 
 Usage: python3 crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
-Requires bubblewrap, libnss-wrapper, curl with HTTPS proxy support, and python-cryptography.
+           [--worker-sandbox namespaces|filter] [--startup-fails]
+Requires libnss-wrapper, curl with HTTPS proxy support, and python-cryptography, and bubblewrap
+for the namespace sandbox. --startup-fails is for a host that refuses the chosen worker sandbox:
+the Gateway has to exit with the error that names the sandbox and the layer that failed.
 No host DNS or trust store modifications.
 """
 import base64
@@ -179,7 +182,39 @@ def server(addr, handler, tls):
         thread.join()
 
 
-def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False):
+def startup_failure(binary, config, sandbox):
+    """A host that refuses the chosen worker sandbox stops the Gateway at startup."""
+    other = {'namespaces': 'filter', 'filter': 'namespaces'}[sandbox]
+    result = subprocess.run([binary, 'serve', str(config)], capture_output=True, text=True, timeout=20)
+    sys.stderr.write(result.stderr)
+    assert result.returncode != 0, 'The Gateway started under a worker sandbox this host was expected to refuse'
+    assert not result.stdout, result.stdout
+    lines = result.stderr.splitlines()
+    assert len(lines) == 2, lines
+    # The sandbox, the layer that failed, then the cause.
+    assert re.fullmatch(rf'worker sandbox "{sandbox}" failed: [A-Za-z -]+: \S.*', lines[0]), lines
+    assert 'operate/#choose-a-worker-sandbox' in lines[1], lines
+    # Neither a fallback nor a hint at one: the other sandbox is never named.
+    assert other not in result.stderr, lines
+
+
+def configuration_loading(dir, binary, config):
+    """`worker_sandbox` is optional and takes two values. Anything else fails loading."""
+    path = dir / 'worker-sandbox.json'
+    def loads(**field):
+        path.write_text(json.dumps({**config, **field}))
+        return subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
+    without = {key: value for key, value in config.items() if key != 'worker_sandbox'}
+    path.write_text(json.dumps(without))
+    assert subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
+    for value in ('namespaces', 'filter'):
+        assert loads(worker_sandbox=value), value
+    for value in ('seccomp', 'Filter', 'none', '', None, True, ['filter']):
+        assert not loads(worker_sandbox=value), value
+
+
+def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False, sandbox=None,
+            startup_fails=False):
     host = f'site.test:{site.server_port}'
     broker.host = host
     broker.accounts = {}
@@ -221,7 +256,12 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
     else:
         (dir/'sidecar.token').write_text(token(bindings['alice']))
         config.update(workload=bindings['alice'],workload_token=str(dir/'sidecar.token'))
+    if sandbox:
+        config['worker_sandbox'] = sandbox
     (dir/'config.json').write_text(json.dumps(config))
+    if startup_fails:
+        return startup_failure(binary, dir/'config.json', sandbox or 'namespaces')
+    configuration_loading(dir, binary, config)
     hosts = dir/'hosts'
     hosts.write_text('127.0.0.1 localhost\n'+ip+' site.test\n')
     # Override /etc/hosts only for the Gateway parent. Grant workers are then
@@ -241,6 +281,12 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         def wait_for_log(pattern, timeout=4):
             with logged:
                 return logged.wait_for(lambda: any(re.fullmatch(pattern, line) for line in log), timeout)
+        def alive(pid):
+            # A killed process stays listed until its new parent collects it.
+            try:
+                return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0] != 'Z'
+            except FileNotFoundError:
+                return False
         def descendants(pid):
             child_list = Path(f'/proc/{pid}/task/{pid}/children')
             direct = [int(c) for c in child_list.read_text().split()]
@@ -257,7 +303,8 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
             else:
                 raise RuntimeError('Gateway did not start')
             # Startup names the worker sandbox and every layer its probe worker applied.
-            assert wait_for_log(r'Gateway worker sandbox "namespaces": namespaces, non-dumpable, '
+            assert wait_for_log(('Gateway worker sandbox "filter": ' if sandbox == 'filter' else
+                                 'Gateway worker sandbox "namespaces": namespaces, ') + 'non-dumpable, '
                                 r'Landlock (ABI v[1-9]\d*|unavailable), seccomp allow-list'), log
             def request(user,extra=(),path='/', timeout=8):
                 args=['curl','--silent','--show-error','--fail','--max-time',str(timeout),'--noproxy','','--proxy',proxy,
@@ -266,11 +313,22 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
                 return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=timeout+2)
             users = list(identities) if shared else ['alice']
+            def launched_directly():
+                # The filter sandbox starts each grant worker itself: every process
+                # under the Gateway is the Gateway's own executable and its child.
+                workers = descendants(child.pid)
+                assert workers, 'grant worker missing'
+                for pid in workers:
+                    status = Path(f'/proc/{pid}/status').read_text()
+                    assert re.search(rf'^PPid:\t{child.pid}$', status, re.M), status
+                    assert re.search(r'^Name:\tcountersign-gat', status, re.M), status
             if filter_kill:
                 # Only Alice's grant worker runs. A grant worker the allow-list
                 # kills dies of SIGSYS, so deliver that signal to it: the
                 # supervisor cannot tell the two apart.
                 assert request('alice').returncode == 0
+                if sandbox == 'filter':
+                    launched_directly()
                 leaves = [pid for pid in descendants(child.pid) if not descendants(pid)]
                 assert len(leaves) == 1, leaves
                 os.kill(leaves[0], signal.SIGSYS)
@@ -281,6 +339,16 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 # A fresh approval is a new grant, which gets a new grant worker.
                 broker.accounts[token(bindings['alice'])][2].update(grant='alice-approved-again')
                 assert request('alice').returncode == 0, 'A fresh approval did not restore service'
+                # No grant worker outlives its supervisor, however the supervisor ends.
+                workers = descendants(child.pid)
+                assert len(workers) >= 2, workers
+                child.kill()
+                for _ in range(40):
+                    if not any(alive(pid) for pid in workers):
+                        break
+                    threading.Event().wait(.05)
+                else:
+                    raise AssertionError('A grant worker outlived its supervisor')
                 return
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(users)) as pool:
                 results = list(pool.map(request,users))
@@ -288,6 +356,8 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 assert res.returncode==0,(user,res.stderr)
                 expected=identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
                 assert res.stdout==expected,(user,res.stdout)
+            if sandbox == 'filter':
+                launched_directly()
             expected_events = {'mtls_accepted','ingress_closed','egress_closed'}
             with broker.observation_change:
                 for user in users:
@@ -350,6 +420,14 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
 
 def main():
     binary=str(Path(sys.argv[1]).resolve())
+    options = sys.argv[2:]
+    startup_fails = '--startup-fails' in options
+    if startup_fails:
+        options.remove('--startup-fails')
+    sandbox = None
+    if options:
+        flag, sandbox = options
+        assert flag == '--worker-sandbox' and sandbox in ('namespaces', 'filter'), __doc__
     with tempfile.TemporaryDirectory(prefix='countersign-gateway-test-') as td:
         os.umask(0o077)
         dir=Path(td)
@@ -371,9 +449,12 @@ def main():
             ip=s.getsockname()[0]
         with server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker:
             for shared in (False,True):
-                do_test(dir,binary,ip,site,broker,identities,ca,shared)
-                print(('shared' if shared else 'sidecar')+' Gateway mTLS passed')
-            do_test(dir,binary,ip,site,broker,identities,ca,True,filter_kill=True)
+                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails)
+                print(('shared' if shared else 'sidecar')+(' Gateway refused to start' if startup_fails
+                                                           else ' Gateway mTLS passed'))
+            if startup_fails:
+                return
+            do_test(dir,binary,ip,site,broker,identities,ca,True,filter_kill=True,sandbox=sandbox)
             print('filter-killed grant worker fenced')
 
 

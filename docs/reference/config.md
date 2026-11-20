@@ -8,7 +8,7 @@ The Broker and Gateway take a JSON file as a positional argument. Paths in the f
 | --- | --- |
 | `countersign-broker /config/broker.json` | Opens the database, starts a new authority epoch, applies configuration and listens. |
 | `countersign-broker --recover-backup /config/broker.json` | Runs offline after a restore. Fences previous authority and leaves emergency stop enabled. |
-| `countersign-gateway serve /config/gateway.json` | Checks Linux worker sandbox startup, opens the configured issuer, publishes the sidecar public CA when applicable, and listens. |
+| `countersign-gateway serve /config/gateway.json` | Probes the chosen worker sandbox and exits if it cannot start, opens the configured issuer, publishes the sidecar public CA when applicable, and listens. |
 | `countersign-gateway env /config/gateway.json` | Writes shell-quoted exports using `proxy_url` and `ca_output`. The launcher supplies these values to the Workload. |
 
 For the sidecar configuration on this page, the helper exports these four values.
@@ -113,6 +113,7 @@ This sidecar example assumes the Gateway's private Workload-facing address is `1
 | `destinations` | Required | Array of Gateway entries. A sidecar needs at least one to construct its CA constraints. |
 | `denied_networks` | `[]` | Additional IPv4 or IPv6 CIDRs to block across destinations. |
 | `clock_uncertainty_ms` | `1000` | Allowed UTC difference from the Broker, in milliseconds, from 0 through 29999. The Gateway subtracts the margin from absolute deadlines and checks its local clock against monotonic elapsed time. |
+| `worker_sandbox` | `"namespaces"` | The worker sandbox for every grant worker, in sidecar and shared mode. `"namespaces"` is the namespace sandbox: bubblewrap gives each grant worker its own filesystem, process and network view, and the grant worker then confines itself with a seccomp allow-list, Landlock and non-dumpable memory. It needs `/usr/bin/bwrap` and a host that lets the Gateway create namespaces. `"filter"` is the filter sandbox: the same confinement without the namespaces, for a host that refuses them, such as ECS Fargate. It needs Linux 5.11 or newer and no bubblewrap. Any other value fails loading. The Gateway never switches from one to the other. [Choose a worker sandbox](../operate.md#choose-a-worker-sandbox) |
 | `shared` | Omitted → sidecar | Shared-mode object. Requires PEM `listener_cert` and `listener_key`, a `gateway_token` file holding the Broker's matching service secret, and a `ca` source below. Omit both sidecar Workload fields. |
 
 ### Destination entries

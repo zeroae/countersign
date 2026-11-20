@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -27,10 +28,33 @@ pub(crate) struct Config {
     #[serde(default)]
     pub denied_networks: Vec<IpNet>,
     pub shared: Option<Shared>,
+    #[serde(default)]
+    pub worker_sandbox: WorkerSandbox,
     /// Conservative upper bound on the difference between Broker and Gateway
     /// UTC. The operator must maintain synchronized clocks.
     #[serde(default = "default_uncertainty")]
     pub clock_uncertainty_ms: u64,
+}
+
+/// The worker sandbox the operator chose (ADR 0001). The Gateway runs every
+/// grant worker under it, and never under the other one.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WorkerSandbox {
+    /// The base layers inside bubblewrap's namespaces.
+    #[default]
+    Namespaces,
+    /// The base layers alone, for a host that refuses namespaces.
+    Filter,
+}
+
+impl fmt::Display for WorkerSandbox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            WorkerSandbox::Namespaces => "namespaces",
+            WorkerSandbox::Filter => "filter",
+        })
+    }
 }
 
 fn default_uncertainty() -> u64 {
