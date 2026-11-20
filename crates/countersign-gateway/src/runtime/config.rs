@@ -48,6 +48,16 @@ pub(crate) enum WorkerSandbox {
     Filter,
 }
 
+impl WorkerSandbox {
+    /// The layer the supervisor adds around the base layers, when it adds one.
+    pub fn outer_layer(self) -> Option<&'static str> {
+        match self {
+            WorkerSandbox::Namespaces => Some("namespaces"),
+            WorkerSandbox::Filter => None,
+        }
+    }
+}
+
 impl fmt::Display for WorkerSandbox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

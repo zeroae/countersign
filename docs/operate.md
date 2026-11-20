@@ -50,7 +50,7 @@ The Gateway runs each grant in its own grant worker, a short-lived process that 
 | `worker_sandbox` | Use it when | What isolates a grant worker |
 | --- | --- | --- |
 | `"namespaces"` (default, recommended) | The host lets an unprivileged process create user, mount, PID and network namespaces. | The base layers, inside namespaces that bubblewrap creates: the grant worker has its own filesystem, process and network view. Requires `/usr/bin/bwrap`. |
-| `"filter"` | The host refuses namespaces and you cannot change that, as on ECS Fargate. | The base layers alone. Requires Linux 5.11 or newer. Does not use bubblewrap. |
+| `"filter"` | The host refuses namespaces and you cannot change that, as on ECS Fargate. | The base layers alone. Does not use bubblewrap. |
 
 Every grant worker applies the same base layers to itself before it reads any input:
 
@@ -131,7 +131,7 @@ sqlite3 -readonly /state/broker.db \
 
 | Symptom | Where to look |
 | --- | --- |
-| Gateway exits with `worker sandbox "<sandbox>" failed: <layer>: <cause>` | Run under the intended service UID, and verify the packaged Gateway rather than testing as root. The layer says what the host refused. Under `"namespaces"`, layer `namespaces`: check that `/usr/bin/bwrap` exists, the host's user namespace policy, the library mounts and the container's seccomp and AppArmor profile. Under `"filter"`, layer `launch`: check that the kernel is Linux 5.11 or newer and that the Gateway can run its own executable. Under either, layer `non-dumpable`, `Landlock` or `seccomp allow-list`: the container security profile refuses a call the grant worker confines itself with, or the kernel lacks seccomp filters. A host that cannot create namespaces at all needs a deliberate choice: read [Choose a worker sandbox](#choose-a-worker-sandbox). |
+| Gateway exits with `worker sandbox "<sandbox>" failed: <layer>: <cause>` | Run under the intended service UID, and verify the packaged Gateway rather than testing as root. The layer says what the host refused. Under `"namespaces"`, layer `namespaces`: check that `/usr/bin/bwrap` exists, the host's user namespace policy, the library mounts and the container's seccomp and AppArmor profile. Under `"filter"`, layer `launch`: check that the Gateway can run its own executable. Under either, layer `non-dumpable`, `Landlock` or `seccomp allow-list`: the container security profile refuses a call the grant worker confines itself with, or the kernel lacks seccomp filters. A host that cannot create namespaces at all needs a deliberate choice: read [Choose a worker sandbox](#choose-a-worker-sandbox). |
 | CONNECT returns 407 | Shared clients need an HTTPS proxy and one proxy bearer header. Check the token audience, expiry, broker boot, and separate service credential. |
 | CONNECT returns 403 or keeps asking for approval | Compare rule ID, version, port, grant scope, memberships and stop controls. A denied or expired prompt requires an explicit retry. Check that the Companion is paired, online and can access the selected identity. |
 | CONNECT returns 429, 503 or 504 | Inspect limits per grant/user, Broker availability, worker fencing, clock synchronization and pending approval. Capture the safe `Countersign-Error` and `Countersign-Request-ID` response headers for correlation. |

@@ -1,10 +1,10 @@
 """Exercise real Linux Gateway processes against a test-only grant authority and mTLS site.
 
 Usage: python3 crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
-           [--worker-sandbox namespaces|filter] [--startup-fails]
+           [--worker-sandbox namespaces|filter] [--startup-fails LAYER]
 Requires libnss-wrapper, curl with HTTPS proxy support, and python-cryptography, and bubblewrap
-for the namespace sandbox. --startup-fails is for a host that refuses the chosen worker sandbox:
-the Gateway has to exit with the error that names the sandbox and the layer that failed.
+for the namespace sandbox. --startup-fails is for a host that refuses LAYER of the chosen worker
+sandbox: the Gateway has to exit with the error that names the sandbox and that layer.
 No host DNS or trust store modifications.
 """
 import base64
@@ -182,7 +182,7 @@ def server(addr, handler, tls):
         thread.join()
 
 
-def startup_failure(binary, config, sandbox):
+def startup_failure(binary, config, sandbox, layer):
     """A host that refuses the chosen worker sandbox stops the Gateway at startup."""
     other = {'namespaces': 'filter', 'filter': 'namespaces'}[sandbox]
     result = subprocess.run([binary, 'serve', str(config)], capture_output=True, text=True, timeout=20)
@@ -192,21 +192,20 @@ def startup_failure(binary, config, sandbox):
     lines = result.stderr.splitlines()
     assert len(lines) == 2, lines
     # The sandbox, the layer that failed, then the cause.
-    assert re.fullmatch(rf'worker sandbox "{sandbox}" failed: [A-Za-z -]+: \S.*', lines[0]), lines
+    assert re.fullmatch(rf'worker sandbox "{sandbox}" failed: {re.escape(layer)}: \S.*', lines[0]), lines
     assert 'operate/#choose-a-worker-sandbox' in lines[1], lines
-    # Neither a fallback nor a hint at one: the other sandbox is never named.
-    assert other not in result.stderr, lines
+    # Neither a fallback nor a hint at one: the other value is never named.
+    assert f'"{other}"' not in result.stderr, lines
 
 
 def configuration_loading(dir, binary, config):
     """`worker_sandbox` is optional and takes two values. Anything else fails loading."""
     path = dir / 'worker-sandbox.json'
-    def loads(**field):
-        path.write_text(json.dumps({**config, **field}))
-        return subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
     without = {key: value for key, value in config.items() if key != 'worker_sandbox'}
-    path.write_text(json.dumps(without))
-    assert subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
+    def loads(**field):
+        path.write_text(json.dumps({**without, **field}))
+        return subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
+    assert loads()
     for value in ('namespaces', 'filter'):
         assert loads(worker_sandbox=value), value
     for value in ('seccomp', 'Filter', 'none', '', None, True, ['filter']):
@@ -214,7 +213,7 @@ def configuration_loading(dir, binary, config):
 
 
 def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False, sandbox=None,
-            startup_fails=False):
+            startup_fails=None):
     host = f'site.test:{site.server_port}'
     broker.host = host
     broker.accounts = {}
@@ -260,7 +259,7 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         config['worker_sandbox'] = sandbox
     (dir/'config.json').write_text(json.dumps(config))
     if startup_fails:
-        return startup_failure(binary, dir/'config.json', sandbox or 'namespaces')
+        return startup_failure(binary, dir/'config.json', sandbox or 'namespaces', startup_fails)
     configuration_loading(dir, binary, config)
     hosts = dir/'hosts'
     hosts.write_text('127.0.0.1 localhost\n'+ip+' site.test\n')
@@ -315,7 +314,7 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
             users = list(identities) if shared else ['alice']
             def launched_directly():
                 # The filter sandbox starts each grant worker itself: every process
-                # under the Gateway is the Gateway's own executable and its child.
+                # under the Gateway runs the Gateway's executable, started by the Gateway.
                 workers = descendants(child.pid)
                 assert workers, 'grant worker missing'
                 for pid in workers:
@@ -421,13 +420,11 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
 def main():
     binary=str(Path(sys.argv[1]).resolve())
     options = sys.argv[2:]
-    startup_fails = '--startup-fails' in options
-    if startup_fails:
-        options.remove('--startup-fails')
-    sandbox = None
-    if options:
-        flag, sandbox = options
-        assert flag == '--worker-sandbox' and sandbox in ('namespaces', 'filter'), __doc__
+    assert len(options) % 2 == 0 and set(options[::2]) <= {'--worker-sandbox', '--startup-fails'}, __doc__
+    options = dict(zip(options[::2], options[1::2]))
+    sandbox = options.get('--worker-sandbox')
+    assert sandbox in (None, 'namespaces', 'filter'), __doc__
+    startup_fails = options.get('--startup-fails')
     with tempfile.TemporaryDirectory(prefix='countersign-gateway-test-') as td:
         os.umask(0o077)
         dir=Path(td)

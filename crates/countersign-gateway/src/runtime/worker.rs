@@ -105,19 +105,27 @@ pub async fn receive<T: DeserializeOwned>(socket: &mut tokio::net::UnixStream) -
 /// The command that starts a grant worker under the chosen worker sandbox.
 /// Either way it gets a cleared environment, and it confines itself with the
 /// base layers once it runs.
-fn sandbox(sandbox: WorkerSandbox, executable: &std::path::Path) -> Command {
+fn launch_command(sandbox: WorkerSandbox, executable: &std::path::Path) -> Command {
     match sandbox {
-        WorkerSandbox::Namespaces => namespaces(executable),
-        WorkerSandbox::Filter => direct(executable),
+        WorkerSandbox::Namespaces => namespace_sandbox(executable),
+        WorkerSandbox::Filter => filter_sandbox(executable),
     }
 }
 
 /// The filter sandbox: the supervisor starts the grant worker itself.
-fn direct(executable: &std::path::Path) -> Command {
+fn filter_sandbox(executable: &std::path::Path) -> Command {
     use std::os::unix::process::CommandExt;
     let mut command = Command::new(executable);
     command.env_clear();
     let supervisor = std::process::id() as nix::libc::pid_t;
+    // The descriptors open now, for a kernel that cannot mark them all in
+    // one call (below). One opened after this listing is the standard
+    // library's or the async runtime's, and those open close-on-exec.
+    let open: Option<Vec<nix::libc::c_int>> = std::fs::read_dir("/proc/self/fd").ok().map(|fds| {
+        fds.filter_map(|fd| fd.ok()?.file_name().to_str()?.parse().ok())
+            .filter(|fd| *fd > 2)
+            .collect()
+    });
     // SAFETY: the closure runs between fork and exec, and makes only system
     // calls: no allocation, no locks.
     unsafe {
@@ -139,14 +147,25 @@ fn direct(executable: &std::path::Path) -> Command {
             // across the exec, whatever the supervisor itself inherited.
             // Marked and not closed here: the standard library reports a
             // failed exec over a descriptor of its own.
-            // CLOSE_RANGE_CLOEXEC needs Linux 5.11; an older kernel
-            // refuses, and so the launch fails.
-            check(libc::syscall(
+            let marked = check(libc::syscall(
                 libc::SYS_close_range,
                 3 as libc::c_uint,
                 libc::c_uint::MAX,
                 libc::CLOSE_RANGE_CLOEXEC,
-            ))
+            ));
+            // Linux before 5.11 has no such flag, and an older container
+            // profile refuses the call. Mark the listed descriptors one by
+            // one; one that has gone since needs no mark.
+            match (marked, &open) {
+                (Ok(()), _) => Ok(()),
+                (Err(_), Some(open)) => {
+                    for fd in open {
+                        libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                    }
+                    Ok(())
+                }
+                (Err(error), None) => Err(error),
+            }
         });
     }
     command
@@ -155,7 +174,7 @@ fn direct(executable: &std::path::Path) -> Command {
 /// The namespace sandbox: only public runtime libraries and the executable
 /// enter this grant's new mount, PID and network namespaces. Each inherited
 /// stream is private IPC.
-fn namespaces(executable: &std::path::Path) -> Command {
+fn namespace_sandbox(executable: &std::path::Path) -> Command {
     let mut command = Command::new("/usr/bin/bwrap");
     command
         .env_clear()
@@ -179,16 +198,33 @@ fn namespaces(executable: &std::path::Path) -> Command {
     command
 }
 
-/// Why the startup probe failed: the chosen worker sandbox and, in `reason`,
-/// the layer that failed and its cause. It names no other sandbox: the
-/// operator reads the trade-off before choosing one (ADR 0001, decision 4).
+/// Why the startup probe failed: the chosen worker sandbox, the layer that
+/// failed and the cause. It names no other sandbox: the operator reads the
+/// trade-off before choosing one (ADR 0001, decision 4).
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "worker sandbox \"{sandbox}\" failed: {reason}\nSee \"Choose a worker sandbox\" in the operator guide: https://zeroae.github.io/countersign/operate/#choose-a-worker-sandbox"
+    "worker sandbox \"{sandbox}\" failed: {layer}: {cause}\nSee \"Choose a worker sandbox\" in the operator guide: https://zeroae.github.io/countersign/operate/#choose-a-worker-sandbox"
 )]
 pub struct SandboxError {
     sandbox: WorkerSandbox,
-    reason: String,
+    layer: String,
+    cause: String,
+}
+
+/// The exit status of a grant worker that could not apply a base layer. It
+/// carries the layer to the startup probe, through bubblewrap too, which
+/// exits with its child's status. The cause is on the standard error stream.
+pub const fn failed_layer_exit(layer: Layer) -> i32 {
+    match layer {
+        Layer::NonDumpable => 64,
+        Layer::Landlock => 65,
+        Layer::AllowList => 66,
+    }
+}
+fn failed_layer(status: ExitStatus) -> Option<Layer> {
+    [Layer::NonDumpable, Layer::Landlock, Layer::AllowList]
+        .into_iter()
+        .find(|layer| status.code() == Some(failed_layer_exit(*layer)))
 }
 
 /// Resolves with a grant worker's exit status when it ends on its own, and
@@ -234,7 +270,7 @@ impl ChildHandle {
         let (control, child_control) = UnixDatagram::pair()?;
         control.set_nonblocking(true)?;
         let process =
-            tokio::process::Command::from(self::sandbox(sandbox, &std::env::current_exe()?))
+            tokio::process::Command::from(launch_command(sandbox, &std::env::current_exe()?))
                 .kill_on_drop(true)
                 .arg("grant-worker")
                 .stdin(Stdio::from(OwnedFd::from(child_control)))
@@ -276,39 +312,36 @@ impl ChildHandle {
     pub async fn verify_environment(
         sandbox: WorkerSandbox,
     ) -> std::result::Result<Layers, SandboxError> {
-        // What the supervisor adds around the base layers. A failure that is
-        // not a base layer's is this one's.
-        let outer = match sandbox {
-            WorkerSandbox::Namespaces => "namespaces",
-            WorkerSandbox::Filter => "launch",
-        };
-        Self::probe(sandbox).await.map_err(|reason| SandboxError {
-            sandbox,
-            reason: if [Layer::NonDumpable, Layer::Landlock, Layer::AllowList]
-                .iter()
-                .any(|layer| reason.starts_with(&format!("{layer}: ")))
-            {
-                reason
-            } else {
-                format!("{outer}: {reason}")
-            },
-        })
+        Self::probe(sandbox)
+            .await
+            .map_err(|(layer, cause)| SandboxError {
+                sandbox,
+                layer: match layer {
+                    Some(base) => base.to_string(),
+                    // Not a base layer's failure, so the supervisor's: the
+                    // layer it adds, or under the filter sandbox, which adds
+                    // none, the launch itself.
+                    None => sandbox.outer_layer().unwrap_or("launch").to_owned(),
+                },
+                cause,
+            })
     }
 
-    /// The probe's layers, or why it failed. A grant worker that could not
-    /// confine itself names the base layer first (`runtime::grant_worker`).
-    async fn probe(sandbox: WorkerSandbox) -> std::result::Result<Layers, String> {
+    /// The probe's layers, or the base layer that failed, when it was one,
+    /// and the cause.
+    async fn probe(sandbox: WorkerSandbox) -> std::result::Result<Layers, (Option<Layer>, String)> {
+        let supervisor = |error: &dyn std::fmt::Display| (None, error.to_string());
         let (process, control) =
-            Self::start(sandbox, Stdio::piped()).map_err(|error| error.to_string())?;
-        control.send(&[0]).map_err(|error| error.to_string())?;
+            Self::start(sandbox, Stdio::piped()).map_err(|error| supervisor(&error))?;
+        control.send(&[0]).map_err(|error| supervisor(&error))?;
         let output = tokio::time::timeout(Duration::from_secs(5), process.wait_with_output())
             .await
-            .map_err(|_| "the probe grant worker did not finish in 5 seconds".to_owned())?
-            .map_err(|error| error.to_string())?;
+            .map_err(|_| supervisor(&"the probe grant worker did not finish in 5 seconds"))?
+            .map_err(|error| supervisor(&error))?;
         if killed_by_filter(output.status) {
-            return Err(format!(
-                "{}: the filter killed the probe grant worker (SIGSYS)",
-                Layer::AllowList
+            return Err((
+                Some(Layer::AllowList),
+                "the allow-list killed the probe grant worker (SIGSYS)".to_owned(),
             ));
         }
         if !output.status.success() {
@@ -319,17 +352,20 @@ impl ChildHandle {
                 .chars()
                 .take(512)
                 .collect();
-            return Err(if hint.is_empty() {
-                format!("the probe grant worker ended with {}", output.status)
-            } else {
-                hint
-            });
+            return Err((
+                failed_layer(output.status),
+                if hint.is_empty() {
+                    format!("the probe grant worker ended with {}", output.status)
+                } else {
+                    hint
+                },
+            ));
         }
         // The report was queued before the probe exited.
         let mut message = [0u8; 2];
         match control.recv(&mut message) {
             Ok(1) => Ok(reported([message[0]])),
-            _ => Err("the probe grant worker reported no layers".to_owned()),
+            _ => Err(supervisor(&"the probe grant worker reported no layers")),
         }
     }
 
@@ -606,27 +642,26 @@ mod tests {
     #[test]
     fn filter_sandbox_launch_passes_on_no_descriptor_and_no_environment() {
         // A descriptor the supervisor inherited open across exec, as `dup`
-        // leaves it, and a variable of the supervisor's environment.
+        // leaves one.
+        let file = fs::File::open("/dev/null").unwrap();
         // SAFETY: `dup` takes a descriptor number and returns a new one, closed below.
-        let inherited = unsafe { nix::libc::dup(0) };
+        let inherited = unsafe { nix::libc::dup(std::os::fd::AsRawFd::as_raw_fd(&file)) };
         assert!(inherited > 2);
-        assert!(std::env::var_os("HOME").is_some());
-        // sh stands in for the grant worker, started as the supervisor starts one.
-        let result = direct(Path::new("/bin/sh"))
-            .args([
-                "-c",
-                r#"test -e /proc/self/fd/0 && test ! -e /proc/self/fd/"$1" && test -z "${HOME+set}""#,
-                "probe",
-            ])
+        // sh and env stand in for the grant worker, started as the supervisor starts one.
+        let descriptors = filter_sandbox(Path::new("/bin/sh"))
+            .args(["-c", r#"test ! -e /proc/self/fd/"$1""#, "probe"])
             .arg(inherited.to_string())
+            .stdin(Stdio::null())
             .output()
             .unwrap();
         // SAFETY: closes the descriptor `dup` returned above, once.
         unsafe { nix::libc::close(inherited) };
+        assert!(descriptors.status.success(), "{descriptors:?}");
+        assert!(std::env::vars_os().next().is_some());
+        let environment = filter_sandbox(Path::new("/usr/bin/env")).output().unwrap();
         assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
+            environment.status.success() && environment.stdout.is_empty(),
+            "{environment:?}"
         );
     }
     #[test]
@@ -638,7 +673,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port().to_string();
         // Use bash only as the test executable, under the same namespace
         // and mount configuration as a production grant worker.
-        let result=namespaces(Path::new("/bin/bash"))
+        let result=namespace_sandbox(Path::new("/bin/bash"))
             .args(["-c", r#"test ! -e "$1" && test ! -e /proc/1/mem && ! (echo probe > /dev/tcp/127.0.0.1/"$2")"#,"probe"])
             .arg(&marker).arg(port).output();
         fs::remove_file(marker).unwrap();

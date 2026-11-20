@@ -856,9 +856,10 @@ pub fn grant_worker() -> Result<()> {
     match countersign_gateway::worker_sandbox::confine() {
         Ok(layers) => worker::serve(layers),
         Err(error) => {
-            // The startup probe passes this on: the layer, then the cause.
-            eprintln!("{error}");
-            std::process::exit(1);
+            // The startup probe passes both on: the cause as written here,
+            // the layer as the exit status.
+            eprintln!("{}", error.source);
+            std::process::exit(worker::failed_layer_exit(error.layer));
         }
     }
 }
@@ -884,13 +885,9 @@ pub async fn run(args: &[String]) -> Result<()> {
             std::process::exit(1);
         }
     };
-    match sandbox {
-        config::WorkerSandbox::Namespaces => {
-            eprintln!("Gateway worker sandbox \"{sandbox}\": namespaces, {layers}")
-        }
-        config::WorkerSandbox::Filter => {
-            eprintln!("Gateway worker sandbox \"{sandbox}\": {layers}")
-        }
+    match sandbox.outer_layer() {
+        Some(outer) => eprintln!("Gateway worker sandbox \"{sandbox}\": {outer}, {layers}"),
+        None => eprintln!("Gateway worker sandbox \"{sandbox}\": {layers}"),
     }
     let policy = config.policy()?;
     let broker = Broker::new(&config)?;
