@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Prove the filter sandbox on a host that refuses namespaces, as ECS Fargate
 # does: run the Gateway's containment test and its runtime test in a container
-# under Docker's default security profile, as an unprivileged user.
+# under Docker's default security profile, as an unprivileged user. Two last
+# steps each use a profile with one quirk instead: a host that refuses the
+# allow-list, and a kernel without close_range.
 #
 # Usage: scripts/filter-sandbox-container.sh
 # Needs Docker and the Rust toolchain. Builds on this host and runs what it
@@ -59,9 +61,9 @@ inside() {
 }
 # A profile that allows every system call but the one these rules refuse, for
 # the steps that need a host with one quirk.
+rules=$(mktemp)
+trap 'rm -f "$rules"' EXIT
 refusing() {
-  rules=$(mktemp)
-  trap 'rm -f "$rules"' EXIT
   printf '{"defaultAction": "SCMP_ACT_ALLOW", "syscalls": [%s]}\n' "$1" >"$rules"
   profile=(--security-opt "seccomp=$rules")
 }

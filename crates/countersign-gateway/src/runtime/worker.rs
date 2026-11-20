@@ -118,14 +118,6 @@ fn filter_sandbox(executable: &std::path::Path) -> Command {
     let mut command = Command::new(executable);
     command.env_clear();
     let supervisor = std::process::id() as nix::libc::pid_t;
-    // The descriptors open now, for a kernel that cannot mark them all in
-    // one call (below). One opened after this listing is the standard
-    // library's or the async runtime's, and those open close-on-exec.
-    let open: Option<Vec<nix::libc::c_int>> = std::fs::read_dir("/proc/self/fd").ok().map(|fds| {
-        fds.filter_map(|fd| fd.ok()?.file_name().to_str()?.parse().ok())
-            .filter(|fd| *fd > 2)
-            .collect()
-    });
     // SAFETY: the closure runs between fork and exec, and makes only system
     // calls: no allocation, no locks.
     unsafe {
@@ -154,21 +146,76 @@ fn filter_sandbox(executable: &std::path::Path) -> Command {
                 libc::CLOSE_RANGE_CLOEXEC,
             ));
             // Linux before 5.11 has no such flag, and an older container
-            // profile refuses the call. Mark the listed descriptors one by
-            // one; one that has gone since needs no mark.
-            match (marked, &open) {
-                (Ok(()), _) => Ok(()),
-                (Err(_), Some(open)) => {
-                    for fd in open {
-                        libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                    }
-                    Ok(())
-                }
-                (Err(error), None) => Err(error),
-            }
+            // profile refuses the call.
+            marked.or_else(|_| mark_each_close_on_exec())
         });
     }
     command
+}
+
+/// Mark every descriptor above the standard streams close-on-exec, one at a
+/// time, as listed by the kernel. It fails when it cannot list or mark them.
+///
+/// # Safety
+/// Makes only system calls, with no allocation and no locks, so it may run
+/// between fork and exec, where the process has one thread.
+unsafe fn mark_each_close_on_exec() -> std::io::Result<()> {
+    use nix::libc;
+    let failed = std::io::Error::last_os_error;
+    // SAFETY (the whole body): every pointer stays inside `entries`, which
+    // the kernel filled with `read` bytes of whole directory entries, each
+    // with a NUL-terminated name. `dir` is open from here to the close below.
+    unsafe {
+        let dir = libc::open(
+            c"/proc/self/fd".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        );
+        if dir < 0 {
+            return Err(failed());
+        }
+        // Of 64-bit words: a directory entry starts with one.
+        let mut entries = [0u64; 512];
+        loop {
+            let read = libc::syscall(
+                libc::SYS_getdents64,
+                dir,
+                entries.as_mut_ptr(),
+                std::mem::size_of_val(&entries),
+            );
+            if read == 0 {
+                break;
+            }
+            if read < 0 {
+                return Err(failed());
+            }
+            let mut at = 0;
+            while at < read as usize {
+                let entry = entries
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(at)
+                    .cast::<libc::dirent64>();
+                at += (*entry).d_reclen as usize;
+                // The name is the descriptor's number. `.` and `..` are not one.
+                let mut digit = (&raw const (*entry).d_name).cast::<u8>();
+                let mut fd: libc::c_int = 0;
+                while (*digit).is_ascii_digit() {
+                    fd = fd * 10 + libc::c_int::from(*digit - b'0');
+                    digit = digit.add(1);
+                }
+                if *digit != 0 || fd <= 2 {
+                    continue;
+                }
+                if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) < 0 {
+                    return Err(failed());
+                }
+            }
+        }
+        // Itself close-on-exec, and closed on every other path by the exit
+        // that follows a failed launch.
+        libc::close(dir);
+    }
+    Ok(())
 }
 
 /// The namespace sandbox: only public runtime libraries and the executable
@@ -213,7 +260,8 @@ pub struct SandboxError {
 
 /// The exit status of a grant worker that could not apply a base layer. It
 /// carries the layer to the startup probe, through bubblewrap too, which
-/// exits with its child's status. The cause is on the standard error stream.
+/// exits with the status of the grant worker it ran. The cause is on the
+/// standard error stream.
 pub const fn failed_layer_exit(layer: Layer) -> i32 {
     match layer {
         Layer::NonDumpable => 64,
