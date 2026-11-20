@@ -40,6 +40,13 @@ async function lastJob() {
     fingerprint:text(job.fingerprint),subject:text(job.subject),error:text(job.error)};
 }
 
+// The Workload's current approval for the host, the one its traffic uses;
+// null when it has none. The lookup never creates an approval.
+async function currentApproval() {
+  try { return await broker('approvals/current',{binding,host}); }
+  catch (err) { if (err.cause===404) return null; throw err; }
+}
+
 async function issueToken() {
   const path=env.WORKLOAD_TOKEN_FILE;
   if (!path) return;
@@ -98,7 +105,7 @@ const server=https.createServer({ca,cert,key,maxHeaderSize:8192},async (req,res)
       case '/api/revoke':result=await broker('revoke',{user:workload.user,id:body.id});break;
       case '/api/devices':result=await broker('devices',{user:workload.user});break;
       case '/api/forget':result=await broker('pairings/forget',{user:workload.user,targets:body.targets});break;
-      case '/api/job':result={result:await lastJob()};break;
+      case '/api/job':result={result:await lastJob(),approval:await currentApproval()};break;
       case '/api/subscribe':result=await broker('push/subscribe',{user:workload.user,subscription:body.subscription});break;
       case '/api/logout':
         if(body.endpoint)await broker('push/unsubscribe',{user:workload.user,endpoint:body.endpoint});

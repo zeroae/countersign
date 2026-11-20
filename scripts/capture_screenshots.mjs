@@ -367,11 +367,10 @@ const portalShots = {
   },
   async 'job-result'(browser, scheme, name) {
     const page = await portal(browser, scheme, demoApi({
-      status: approvedStatus,
       job: () => ({ result: { url: 'https://ledger.partner.example/statements/latest', ok: true, http_status: 200,
-        fingerprint: fingerprints.selected, subject: 'Demo user', error: null } }),
+        fingerprint: fingerprints.selected, subject: 'Demo user', error: null }, approval: approvedStatus() }),
     }));
-    await page.goto(PORTAL + '/job#countersign=' + approvalId);
+    await page.goto(PORTAL + '/job');
     await page.locator('#match').waitFor();
     await capture(page, name, { clip: content, selectors: { compare: '.pair-cards', match: '#match' } });
   },

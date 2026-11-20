@@ -132,9 +132,9 @@ function renderDeadline(current) {
   const until = current === 'active' ? page.status?.expires_at_ms : null;
   $('access-ends-row').hidden = !until;
   if (!until) return;
-  const show = () => { $('access-ends').textContent = left(until - Date.now()) + ' left · until ' + clock(until); };
-  show();
-  page.tick = setInterval(show, 1000);
+  const tick = () => { $('access-ends').textContent = left(until - Date.now()) + ' left · until ' + clock(until); };
+  tick();
+  page.tick = setInterval(tick, 1000);
 }
 
 function renderDevices() {
@@ -183,7 +183,7 @@ async function refresh() {
 
 async function showJob() {
   const { session } = page;
-  const { result } = await post('job');
+  const { result, approval } = await post('job');
   $('job-eyebrow').textContent = 'Job ' + session.workload + ' · ' + (session.title || session.context);
   $('job-empty').hidden = !!result;
   $('job-peer').hidden = !result?.ok;
@@ -204,14 +204,16 @@ async function showJob() {
   }
   $('job-fingerprint').textContent = result.fingerprint;
   $('job-subject').textContent = 'Subject: ' + result.subject;
-  // The Broker's status names the certificate the user approved; compare it
-  // with the one the site received, so nobody has to copy a fingerprint.
-  const approved = page.status?.certificate;
+  // The backend reads the Workload's current approval from the Broker, which
+  // names the certificate the user approved; compare it with the one the site
+  // received, so nobody has to copy a fingerprint.
+  const approved = approval?.certificate;
   $('job-approved').textContent = approved?.sha256 ?? '';
   $('job-approved-subject').textContent = approved?.subject ? 'Subject: ' + approved.subject : '';
+  const same = approved?.sha256 === result.fingerprint;
   $('no-compare').hidden = !!approved;
-  $('match').hidden = !approved || approved.sha256 !== result.fingerprint;
-  $('mismatch').hidden = !approved || approved.sha256 === result.fingerprint;
+  $('match').hidden = !approved || !same;
+  $('mismatch').hidden = !approved || same;
 }
 
 async function load() {

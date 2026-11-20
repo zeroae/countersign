@@ -647,6 +647,15 @@ async fn status(h: &Harness, id: &Value) -> Value {
         .await
         .unwrap()
 }
+async fn current(h: &Harness, lookup: &Value) -> Value {
+    h.post("backend/approvals/current", BACKEND, lookup.clone())
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
 /// Approves the pending approval `id` with the harness leaf and returns the activation's deadline.
 /// A renewal's approval also retires its predecessor's grant on this Companion.
 async fn approve(
@@ -696,6 +705,17 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         .await
         .unwrap();
     let token = credentials["token"].as_str().unwrap();
+    let lookup = json!({"binding":credentials["binding"],"host":"upstream.test:443"});
+    let none = h
+        .post("backend/approvals/current", BACKEND, lookup.clone())
+        .await;
+    assert_eq!(none.status(), 404);
+    let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
+    let approvals = |db: &rusqlite::Connection| {
+        db.query_row("SELECT count(*) FROM approval", [], |r| r.get::<_, i64>(0))
+            .unwrap()
+    };
+    assert_eq!(approvals(&db), 0, "the lookup creates no approval");
     let pending: Value = h
         .post(
             "gateway/admit",
@@ -712,6 +732,7 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         .await
         .unwrap();
     let first = pending["body"]["id"].clone();
+    assert_eq!(current(&h, &lookup).await["id"], first);
     let view = status(&h, &first).await;
     assert_eq!(view["state"], "pending");
     assert!(view.get("expires_at_ms").is_none(), "{view}");
@@ -730,6 +751,11 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         "not_after_ms": LEAF_NOT_AFTER_MS,
     });
     assert_eq!(view["certificate"], leaf);
+    assert_eq!(
+        current(&h, &lookup).await,
+        view,
+        "the lookup returns the status view"
+    );
     let expires = view["expires_at_ms"].as_u64().unwrap();
     assert_eq!(expires % 1000, 0, "whole seconds, as the grant stores them");
     assert!(
@@ -756,6 +782,11 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     let second = renewed["id"].clone();
     assert_ne!(second, first);
     assert!(status(&h, &second).await.get("certificate").is_none());
+    assert_eq!(
+        current(&h, &lookup).await["id"],
+        first,
+        "a pending renewal is not yet current"
+    );
     approve(&h, &mut sock, &second, 600, true).await;
     let replaced = status(&h, &first).await;
     assert_eq!(replaced["state"], "replaced");
@@ -766,6 +797,15 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
     assert_eq!(replaced["certificate"], leaf);
     let successor = status(&h, &second).await;
     assert_eq!(successor["state"], "approved");
+    assert_eq!(current(&h, &lookup).await["id"], second);
+    let mut stranger = lookup.clone();
+    stranger["binding"]["integrator"] = "someone-else".into();
+    assert_eq!(
+        h.post("backend/approvals/current", BACKEND, stranger)
+            .await
+            .status(),
+        404
+    );
     assert!(successor["expires_at_ms"].as_u64().unwrap() < expires);
 
     let refused: Value = h
@@ -811,7 +851,6 @@ async fn status_reports_grant_expiry_and_certificate_once_a_grant_exists() {
         .await
         .unwrap();
     assert_ne!(lapsed["id"], refused["id"]);
-    let db = rusqlite::Connection::open(h._dir.path().join("store.db")).unwrap();
     db.execute(
         "UPDATE approval SET pending_until=unixepoch()-5 WHERE id=?1",
         [lapsed["id"].as_str().unwrap()],

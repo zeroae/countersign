@@ -169,10 +169,10 @@ def verify(desktop, browser, origin, fixture, curl, state, url):
                 job=web.new_page()
                 job.goto(origin+"/job")
                 expect(job.locator("#job-fingerprint")).to_have_text(fingerprint)
-                job.get_by_label("SHA-256 you selected in the Companion").fill(fingerprint)
-                job.get_by_role("button",name="Compare").click()
+                # The Integrator finds the job's approval through the Broker and compares by itself.
+                expect(job.locator("#job-approved")).to_have_text(fingerprint)
                 expect(job.locator("#match")).to_be_visible()
-                print("Job page shows the fingerprint the site received",flush=True)
+                print("Job page matched the fingerprint the site received with the approval",flush=True)
             finally:
                 if workload.poll() is None:
                     workload.terminate()

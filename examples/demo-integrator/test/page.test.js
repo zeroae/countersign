@@ -54,15 +54,17 @@ test('the Access approved page counts down to the grant deadline', async () => {
   await page.context().close();
 });
 
-const ran = fingerprint => () => ({ result: { url: 'https://ledger.partner.example/statements/latest', ok: true,
-  http_status: 200, fingerprint, subject: 'Demo user', error: null } });
+// /api/job as integrator.js answers it: the last job's result and the
+// Workload's current approval, which the Broker lookup returns.
+const ran = (fingerprint, approval) => () => ({ result: { url: 'https://ledger.partner.example/statements/latest',
+  ok: true, http_status: 200, fingerprint, subject: 'Demo user', error: null }, approval });
 const certificate = { sha256: SHA256, subject: 'CN=Demo user', issuer: 'CN=Countersign demo client-ca',
   not_after_ms: NOW + 86_400_000 };
 
 test('the Job result page compares the fingerprints without a paste box', async () => {
   for (const [fingerprint, shown, hidden] of [[SHA256, '#match', '#mismatch'], [OTHER, '#mismatch', '#match']]) {
-    const page = await open({ status: () => approved({ expires_at_ms: NOW + 60_000, certificate }),
-      job: ran(fingerprint) }, '/job#countersign=' + ID);
+    // No approval in this tab: the job's own request started it.
+    const page = await open({ job: ran(fingerprint, approved({ expires_at_ms: NOW + 60_000, certificate })) }, '/job');
     await page.locator(shown).waitFor();
     assert.equal(await page.locator(hidden).isVisible(), false, fingerprint);
     assert.equal(await page.locator('textarea').count(), 0, 'no paste box');
@@ -71,11 +73,12 @@ test('the Job result page compares the fingerprints without a paste box', async 
   }
 });
 
-test('the Job result page says when the approval has no certificate to compare', async () => {
-  const page = await open({ status: () => ({ id: ID, state: 'pending', ready: false }), job: ran(SHA256) },
-    '/job#countersign=' + ID);
-  await page.locator('#no-compare').waitFor();
-  assert.equal(await page.locator('#match').isVisible(), false);
-  assert.equal(await page.locator('#mismatch').isVisible(), false);
-  await page.context().close();
+test('the Job result page says when the job has no approved certificate to compare', async () => {
+  for (const approval of [null, { id: ID, state: 'pending', ready: false }]) {
+    const page = await open({ job: ran(SHA256, approval) }, '/job');
+    await page.locator('#no-compare').waitFor();
+    assert.equal(await page.locator('#match').isVisible(), false);
+    assert.equal(await page.locator('#mismatch').isVisible(), false);
+    await page.context().close();
+  }
 });
