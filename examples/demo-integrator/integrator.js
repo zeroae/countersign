@@ -41,10 +41,11 @@ async function lastJob() {
 }
 
 // The Workload's current approval for the host, the one its traffic uses;
-// null when it has none. The lookup never creates an approval.
+// null when it has none or the Broker can't answer, so the job's own result
+// still shows. The lookup never creates an approval.
 async function currentApproval() {
   try { return await broker('approvals/current',{binding,host}); }
-  catch (err) { if (err.cause===404) return null; throw err; }
+  catch { return null; }
 }
 
 async function issueToken() {

@@ -228,12 +228,16 @@ pub(super) async fn current(
 ) -> Result<Json<Value>> {
     auth(&s, &h)?;
     s.apply(move |a| {
+        // Only this Integrator's own Workloads have a current approval here.
+        if req.binding.integrator != a.integrator {
+            return Err(Fault::Unavailable);
+        }
         let scope = a.policy.scope_for(&req.host).ok_or(Fault::Unavailable)?;
         let b = &req.binding;
         let id: String = a.store.connection.query_row(
             "SELECT id FROM approval WHERE current=1 AND integrator=?1 AND owner=?2 AND context=?3
              AND workload=?4 AND workload_generation=?5 AND entry_id=?6 AND entry_version=?7 AND scope=?8",
-            params![b.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str(),
+            params![a.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str(),
                 i64::try_from(b.workload_generation.get()).map_err(|_|Fault::Invalid)?,
                 scope.entry_id(),i64::try_from(scope.entry_version()).map_err(|_|Fault::Invalid)?,
                 scope.pattern().to_string()],
