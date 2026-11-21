@@ -1,6 +1,6 @@
 # Tested platforms
 
-If you are evaluating Countersign for a desktop fleet, start with the provider and processor your users actually have. Unless a section names its own revisions, the runs below exercised implementation revision `fbb5aa7`. They distinguish a native TLS test, loading the packaged application, and driving an approval all the way to a website.
+If you are evaluating Countersign for a desktop fleet, start with the provider and processor your users actually have. Unless a section names its own revisions, the runs below exercised implementation revision `fbb5aa7`. They distinguish a native TLS test, loading the packaged application, and driving an approval all the way to a website. If you are choosing a host for the Gateway, see [Gateway hosts and the worker sandbox](#gateway-hosts-and-the-worker-sandbox).
 
 ## Native identity and desktop packages
 
@@ -32,9 +32,9 @@ The Gateway's [worker sandbox](../operate.md#choose-a-worker-sandbox) depends on
 
 | Host | Processor | Filter sandbox | Evidence |
 |---|---|---|---|
-| ECS Fargate 1.4.0 | x86-64 | Qualified | End to end, on release [v0.2.1](https://github.com/zeroae/countersign/releases/tag/v0.2.1) (`7199c78`): a shared Gateway ran in a Fargate task with the Broker and an mTLS site. A paired Companion on a Linux ARM64 desktop approved two concurrent grants, and both chat replies showed the site's flag. [Reporter's run](https://github.com/zeroae/countersign/issues/18#issuecomment-7066219942) · Harness, at revision `30bedc2`: kernel 6.1.190 with Landlock ABI v2, and the containment test and the runtime test under `"filter"` passed. [Harness run](https://github.com/zeroae/countersign/issues/24#issuecomment-7032499034) |
+| ECS Fargate 1.4.0 | x86-64 | Qualified | End to end, on release [v0.2.1](https://github.com/zeroae/countersign/releases/tag/v0.2.1) (`7199c78`): a shared Gateway ran in a Fargate task with the Broker and an mTLS site. A paired Companion on a Linux ARM64 desktop approved two concurrent grants. The mTLS site answered each grant's request with its protected flag, and the demo Integrator's chat showed that flag in both replies. [Reporter's run](https://github.com/zeroae/countersign/issues/18#issuecomment-7066219942) · Harness, at revision `30bedc2`: kernel 6.1.190 with Landlock ABI v2, and the containment test and the runtime test under `"filter"` passed. [Harness run](https://github.com/zeroae/countersign/issues/24#issuecomment-7032499034) |
 | ECS Fargate 1.4.0 | arm64 | Harness only | Harness, at revision `30bedc2`: kernel 6.1.190 with Landlock ABI v2, and the containment test and the runtime test under `"filter"` passed. No end-to-end run with a Companion has been made. [Harness run](https://github.com/zeroae/countersign/issues/24#issuecomment-7032499034) |
 
-The harness runs the Gateway's containment test and its runtime test, with a test grant authority and mTLS site, inside a Fargate task that refuses namespaces. Maintainers rerun it for every release that touches the grant worker. [Fargate qualification harness](https://github.com/zeroae/countersign/tree/30bedc26b301997730c8f963611042677aa30a9a/qualification/fargate)
+The harness runs the Gateway's containment test and its runtime test, with a test grant authority and mTLS site, inside a Fargate task that refuses namespaces. [Fargate qualification harness](https://github.com/zeroae/countersign/tree/7199c789e2e514cb6201ba84eed0071d9a0b50e0/qualification/fargate)
 
 Full graphical pairing-to-website runs on Windows and macOS, physical smartcards and their PIN dialogs, other Linux keyrings, live AWS Private CA or ZAE-ZCM, production shared infrastructure, external protected sites and an end-to-end run of the filter sandbox on Fargate arm64 remain unqualified. Signed Windows releases and macOS notarization also await credentials and a release run.
