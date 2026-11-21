@@ -1,0 +1,1181 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Desktop approval for HTTPS workloads that use an installed client certificate.">
+      
+      
+      
+        <link rel="canonical" href="https://zeroae.github.io/countersign/0.2.1/companion/">
+      
+      
+        <link rel="prev" href="../try/">
+      
+      
+        <link rel="next" href="../integrate/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/app-icon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Use the Companion - Countersign</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#use-the-companion" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Countersign" class="md-header__button md-logo" aria-label="Countersign" data-md-component="logo">
+      
+  <img src="../assets/mark-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Countersign
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Use the Companion
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zeroae/countersign" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zeroae/countersign
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Countersign" class="md-nav__button md-logo" aria-label="Countersign" data-md-component="logo">
+      
+  <img src="../assets/mark-white.svg" alt="logo">
+
+    </a>
+    Countersign
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zeroae/countersign" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zeroae/countersign
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Countersign
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../try/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try Countersign
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the Companion
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the Companion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#install-the-companion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install the Companion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#find-your-way-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find your way around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-an-integrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair an Integrator
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decide-what-to-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decide what to approve
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decide what to approve">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#read-a-wildcard-approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read a wildcard approval
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-an-integrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage an Integrator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Manage an Integrator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#review-a-branding-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review a branding change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-an-approval-doesnt-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When an approval doesn't work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-from-npm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install from npm
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrate a service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-host and operate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture and trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration, CLI and environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Broker API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/widget/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Widget and branding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tested platforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../develop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Develop and release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#install-the-companion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install the Companion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#find-your-way-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find your way around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-an-integrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair an Integrator
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decide-what-to-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decide what to approve
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decide what to approve">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#read-a-wildcard-approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read a wildcard approval
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-an-integrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage an Integrator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Manage an Integrator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#review-a-branding-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review a branding change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-an-approval-doesnt-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When an approval doesn't work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-from-npm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install from npm
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="use-the-companion">Use the Companion<a class="headerlink" href="#use-the-companion" title="Permanent link">&para;</a></h1>
+<p>Install the Companion on the computer that already holds your client certificate. Your remote job can then ask this computer to authenticate to a website. Pair each Integrator once. When a request arrives, you decide which certificate the job may use, where it may use it and for how long.</p>
+<h2 id="install-the-companion">Install the Companion<a class="headerlink" href="#install-the-companion" title="Permanent link">&para;</a></h2>
+<p>Choose the desktop artifact for your operating system and processor from the distribution run. Each archive contains the installer and a separate native addon for developers. The installer already includes its matching addon. These builds are unsigned. <a href="https://github.com/zeroae/countersign/actions/runs/44195966471/attempts/2">Installer artifacts</a> · <a href="../reference/support/">Tested platforms</a></p>
+<table>
+<thead>
+<tr>
+<th>Desktop</th>
+<th>Package</th>
+<th>Where the Companion finds your website certificate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td>Run the per-user <code>.exe</code> installer and open <strong>Countersign</strong> from Start.</td>
+<td>The current user's Personal certificate store, backed by a CNG signing key.</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>Open the <code>.pkg</code> installer, then open <strong>Countersign</strong> from Applications.</td>
+<td>A Keychain identity whose private key is accessible to Security.framework.</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td>Install the <code>.deb</code> with your package manager, or make the <code>.AppImage</code> executable and launch it in your desktop session.</td>
+<td>A PKCS#11 token available through p11-kit or the configured module. Unlock your encrypted login keyring before pairing.</td>
+</tr>
+</tbody>
+</table>
+<p>Enable <strong>Start at login</strong> under <strong>Settings</strong> if this computer should receive requests after sign-in. Open the window again from the tray using <strong>Open Countersign</strong>. Linux users can also <a href="../develop/#install-with-conda-on-linux">build and install the local conda package</a>.</p>
+<h2 id="find-your-way-around">Find your way around<a class="headerlink" href="#find-your-way-around" title="Permanent link">&para;</a></h2>
+<p>The window has three tabs. <strong>Requests</strong> shows one approval request at a time and opens by itself when a request arrives. <strong>Integrators</strong> lists your pairings, each with its own details page. <strong>Settings</strong> holds <strong>Start at login</strong>. The window follows your system's light or dark appearance.</p>
+<p><img alt="The Integrators tab in Countersign's purple theme, listing portal.example (Harbor Ledger), audit.example (Lantern Audit, branding change to review) and jobs.example with their status, above the form to pair another Integrator." src="../assets/screenshots/integrators-list.png#gh-light-mode-only" /><img alt="The Integrators tab in Countersign's purple theme, listing portal.example (Harbor Ledger), audit.example (Lantern Audit, branding change to review) and jobs.example with their status, above the form to pair another Integrator." src="../assets/screenshots/integrators-list-dark.png#gh-dark-mode-only" /></p>
+<p>While a request, a pairing confirmation or an Integrator's details are on screen, the whole window takes on that Integrator's colours, with its logo, name and copy in the header beside its verified origin. Lists, Settings and Integrators that publish no branding use Countersign's purple theme. Whatever the colours, the Companion draws the request facts, warnings, certificate details and the <strong>Deny</strong> and <strong>Approve</strong> buttons the same way, and the countersign mark stays at the bottom right. <a href="../reference/widget/#brand-the-companion-prompt">What a theme can change</a></p>
+<h2 id="pair-an-integrator">Pair an Integrator<a class="headerlink" href="#pair-an-integrator" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Get the Integrator's HTTPS origin from your signed-in service. On the <strong>Integrators</strong> tab, enter the full origin, including a nonstandard port, in <strong>Integrator origin</strong> and choose <strong>Pair</strong>.</li>
+<li>The Companion opens the Integrator in your browser and shows a pairing code. Sign into the intended account in the browser and enter that code.</li>
+<li>Back in the Companion, check the verified origin, account and code before choosing <strong>Confirm pairing</strong>. The Integrator then appears in the list. A second Integrator gets its own pairing and connection.</li>
+</ol>
+<p><img alt="Companion in Harbor Ledger's colours asking the user to confirm the verified Integrator origin and account, with the pairing code 7B9D F613 D8 in large type above Cancel pairing and Confirm pairing." src="../assets/screenshots/pairing-companion.png#gh-light-mode-only" /><img alt="Companion in Harbor Ledger's colours asking the user to confirm the verified Integrator origin and account, with the pairing code 7B9D F613 D8 in large type above Cancel pairing and Confirm pairing." src="../assets/screenshots/pairing-companion-dark.png#gh-dark-mode-only" /></p>
+<p>The browser half of pairing is illustrated in the <a href="../try/#pair-the-desktop">demo walkthrough</a>.</p>
+<h2 id="decide-what-to-approve">Decide what to approve<a class="headerlink" href="#decide-what-to-approve" title="Permanent link">&para;</a></h2>
+<p>Open the local notification, choose <strong>Open Companion</strong> on the Integrator's site, or open the tray app. Requests wait in a queue and the Companion shows the oldest first, with a count of the others. Read the verified origin and account first under <strong>Checked by Countersign</strong>, then check that the Context corresponds to the job you started. <strong>Requested host</strong> identifies the immediate connection. <strong>Approval covers</strong> describes every destination the job can reach with this grant.</p>
+<p><img alt="Companion in Harbor Ledger's colours with the second of two identically named certificates selected, the 1 h duration preset, Access ends 7:39 PM today, and the Deny and Approve buttons." src="../assets/screenshots/approval-selected.png#gh-light-mode-only" /><img alt="Companion in Harbor Ledger's colours with the second of two identically named certificates selected, the 1 h duration preset, Access ends 7:39 PM today, and the Deny and Approve buttons." src="../assets/screenshots/approval-selected-dark.png#gh-dark-mode-only" /></p>
+<p>The Companion lists the eligible installed certificates. With <strong>two or more</strong>, you must select one before <strong>Approve</strong> becomes available. When certificates share a name, the part of each SHA-256 fingerprint where they first differ is highlighted, and a pattern drawn from the fingerprint sits beside each one. Also compare the issuer and expiry. With one eligible certificate, it is selected and still needs your approval. If none qualify, or the certificate provider is unavailable, a warning explains why and you can deny the request. Only the selected public chain is sent to the Broker.</p>
+<p>Pick <strong>15 min</strong>, <strong>1 h</strong> or <strong>8 h</strong>, or choose <strong>Custom</strong> to enter minutes. The administrator's limit disables longer presets. <strong>Access ends</strong> shows the time the approval stops and how far away it is. If the selected certificate expires first, a warning says that access ends with the certificate. Approval lets this job use the certificate for further handshakes within that scope and duration. A native provider may separately prompt to unlock a key or token.</p>
+<p>Each request that appears locks <strong>Approve</strong> for about a second, so a click meant for the previous screen cannot approve it. When the next request comes from a different Integrator, a banner reads <strong>Now showing a request from</strong> and the origin, and the window changes to that Integrator's colours.</p>
+<p><img alt="Companion after the queue moved on to a Lantern Audit request: a dark banner reads Now showing a request from audit.example, the window uses Lantern Audit's amber colours, and Approve is disabled with the reason that the request is from a different Integrator." src="../assets/screenshots/queue-switch.png#gh-light-mode-only" /><img alt="Companion after the queue moved on to a Lantern Audit request: a dark banner reads Now showing a request from audit.example, the window uses Lantern Audit's amber colours, and Approve is disabled with the reason that the request is from a different Integrator." src="../assets/screenshots/queue-switch-dark.png#gh-dark-mode-only" /></p>
+<h3 id="read-a-wildcard-approval">Read a wildcard approval<a class="headerlink" href="#read-a-wildcard-approval" title="Permanent link">&para;</a></h3>
+<p>In this example, the job requested <code>reports.team.example:9444</code>. The administrator enabled approval for the whole <code>*.team.example:9444</code> entry. That can also cover <code>archive.team.example:9444</code> under the same policy. The apex, deeper names and other ports fall outside this scope. The normal setting even for a wildcard entry is an approval for the single requested host.</p>
+<p><img alt="Companion shows reports.team.example:9444 as the requested host and *.team.example:9444 as the approval scope, followed by a warning that the approval covers more than the requested host." src="../assets/screenshots/scope-wildcard.png#gh-light-mode-only" /><img alt="Companion shows reports.team.example:9444 as the requested host and *.team.example:9444 as the approval scope, followed by a warning that the approval covers more than the requested host." src="../assets/screenshots/scope-wildcard-dark.png#gh-dark-mode-only" /></p>
+<p>Choose <strong>Deny</strong> if the scope is wider than you intended. The Integrator can request access again after it changes the policy. If several desktops receive an offer, the first committed decision settles it for all of them. An approved grant uses the identity on the desktop that won the request.</p>
+<h2 id="manage-an-integrator">Manage an Integrator<a class="headerlink" href="#manage-an-integrator" title="Permanent link">&para;</a></h2>
+<p>Choose an Integrator on the <strong>Integrators</strong> tab to open its details. The page shows the connection status, current approvals, the Companions paired to your account, and any security notices. <strong>This computer</strong> marks this Companion's own pairing in the device list.</p>
+<p><img alt="Harbor Ledger's details page with a warning that another Companion connected to the account, three approvals with Revoke access and Retry revocation buttons, two paired Companions with this computer flagged, and the pairing actions." src="../assets/screenshots/integrator-detail.png#gh-light-mode-only" /><img alt="Harbor Ledger's details page with a warning that another Companion connected to the account, three approvals with Revoke access and Retry revocation buttons, two paired Companions with this computer flagged, and the pairing actions." src="../assets/screenshots/integrator-detail-dark.png#gh-dark-mode-only" /></p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Close the window</td>
+<td>The Companion stays in the tray and continues to receive requests and sign approved handshakes.</td>
+</tr>
+<tr>
+<td>Choose <strong>Quit</strong> in the tray</td>
+<td>New handshakes require the approving desktop to reconnect. Established traffic can continue while its leases renew, up to the grant's expiry.</td>
+</tr>
+<tr>
+<td>Choose <strong>Revoke access</strong> on an approval</td>
+<td>The Companion queues the revocation and shows when the Broker records it. From that point outstanding traffic has at most its existing lease budget.</td>
+</tr>
+<tr>
+<td>Choose <strong>Remove from this computer</strong></td>
+<td>After you confirm in the dialog, deletes this computer's pairing key and local state. Use the Integrator's device controls to end the remote pairing and grants.</td>
+</tr>
+<tr>
+<td>Choose <strong>Revoke pairing at Integrator</strong></td>
+<td>After you confirm, opens the verified Integrator's device-management page. Select the pairing to forget. You can also use that page from another computer if this one is lost.</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="A Companion dialog asking Remove jobs.example from this computer?, explaining that access already granted stays active until it is revoked at the Integrator, with Cancel and a red Remove from this computer button." src="../assets/screenshots/dialog-remove.png#gh-light-mode-only" /><img alt="A Companion dialog asking Remove jobs.example from this computer?, explaining that access already granted stays active until it is revoked at the Integrator, with Cancel and a red Remove from this computer button." src="../assets/screenshots/dialog-remove-dark.png#gh-dark-mode-only" /></p>
+<p>If another Companion connects to your account, a notice gives its connection information and device ID. Review the ID before choosing <strong>Disconnect device</strong> or <strong>Disconnect all other devices</strong>, and confirm in the dialog. Removing another device revokes its grants. An independent lease deadline bounds the remaining traffic. <a href="../architecture/#when-access-ends">How revocation works</a></p>
+<h3 id="review-a-branding-change">Review a branding change<a class="headerlink" href="#review-a-branding-change" title="Permanent link">&para;</a></h3>
+<p>If a paired Integrator changes its logo, name, copy or colours, its details page shows the current and proposed branding side by side. Choose <strong>Accept new branding</strong> to adopt it, which also changes the colours the window takes on for that Integrator. Choose <strong>Keep current</strong> to dismiss it. The Companion does not ask again about the same proposal, only about a later change. The verified origin and approval controls belong to the Companion either way.</p>
+<p><img alt="Lantern Audit's details page showing its current amber branding beside a proposed purple one, with Accept new branding and Keep current buttons." src="../assets/screenshots/branding-review.png#gh-light-mode-only" /><img alt="Lantern Audit's details page showing its current amber branding beside a proposed purple one, with Accept new branding and Keep current buttons." src="../assets/screenshots/branding-review-dark.png#gh-dark-mode-only" /></p>
+<h2 id="when-an-approval-doesnt-work">When an approval doesn't work<a class="headerlink" href="#when-an-approval-doesnt-work" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>What you see</th>
+<th>What to check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No desktop notification</td>
+<td>Open the <strong>Requests</strong> tab, then check the Integrator's status on the <strong>Integrators</strong> tab. A web notification or deep link locates a pending request. It cannot approve one.</td>
+</tr>
+<tr>
+<td>No eligible installed certificate</td>
+<td>Check that the identity is valid for client authentication, has its private key, and matches the issuer and signature schemes allowed for this destination. Ask the Integrator which identity it expects.</td>
+</tr>
+<tr>
+<td>Provider unavailable</td>
+<td>Unlock the native provider and reconnect the token if applicable. On Linux verify that p11-kit can see the token in the same login session. Request access again.</td>
+</tr>
+<tr>
+<td>Approved, but the job still cannot connect</td>
+<td>Look for <strong>Ready for handshakes</strong> in the Integrator's details on the approving desktop. If the original connection attempt timed out, retry it from the job. The Integrator can distinguish an approval from an accepted upstream handshake.</td>
+</tr>
+<tr>
+<td>Revocation queued</td>
+<td>Reconnect to the verified Integrator and use <strong>Retry revocation</strong>. If the desktop cannot reconnect, revoke through the Integrator. The lease cutoff starts from the Broker's recorded decision.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="install-from-npm">Install from npm<a class="headerlink" href="#install-from-npm" title="Permanent link">&para;</a></h2>
+<p>Run <code>npx @zeroae/countersign</code> on the desktop. npm downloads the platform package for your Node architecture (x64 or ARM64). The command opens the installer on Windows and macOS, or runs the AppImage on Linux. To locate the file for manual installation, run <code>npx @zeroae/countersign --print-path</code>. The binary ships inside the npm tarball.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../try/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Try Countersign">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Try Countersign
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../integrate/" class="md-footer__link md-footer__link--next" aria-label="Next: Integrate a service">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Integrate a service
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

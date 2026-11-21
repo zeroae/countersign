@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" width="680" height="320" role="img" aria-labelledby="title desc">
+  <title id="title">A sidecar for one Workload</title>
+  <desc id="desc">Separate Workload and Gateway containers share a public CA volume. The Gateway parent publishes the public CA certificate to the volume, which the Workload mounts read-only. The parent retains the ephemeral CA key and coordinates the sandboxed worker that negotiates both TLS sessions. Solid arrows are application traffic; dashed arrows are control.</desc>
+  <defs>
+    <marker id="data" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path class="head-traffic" d="M0 0 8 4 0 8Z"/></marker>
+    <marker id="control" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="head-control" d="M0 0 8 4 0 8Z"/></marker>
+  </defs>
+  <style>
+    /* palette:start */ svg{--bg:#1e2029;--text:#ece6f1;--muted:#bfb5c8;--zone-fill:#262230;--zone-stroke:#514660;--desk-fill:#1f2922;--desk-stroke:#4d6751;--surface:#2b2635;--actor-fill:#2f2939;--box-stroke:#a68bb6;--local-stroke:#86a889;--traffic:#c9a6e0;--control:#9cc98a;--note-text:#cfe5c0;--band-request:#28232f;--band-sign:#222a24;--font:DejaVu Sans, Verdana, sans-serif} /* palette:end */
+    text {font-family:var(--font);fill:var(--text)}
+    .bg {fill:var(--bg)}
+    .zone {fill:var(--zone-fill);stroke:var(--zone-stroke)}
+    .box {fill:var(--surface);stroke:var(--box-stroke)}
+    .zone-title {font-weight:bold;font-size:15px} .role {font-weight:bold;font-size:16px}
+    .detail {font-size:13px;fill:var(--muted)}
+    .label {font-size:13px;fill:var(--control);font-weight:bold}
+    .traffic {fill:none;stroke:var(--traffic);stroke-width:2;marker-end:url(#data)}
+    .ctrl {fill:none;stroke:var(--control);stroke-width:1.7;stroke-dasharray:5 4;marker-end:url(#control)}
+    .head-traffic {fill:var(--traffic)} .head-control {fill:var(--control)}
+  </style>
+  <rect class="bg" width="680" height="320"/>
+  <rect class="zone" x="8" y="10" width="229" height="154" rx="9"/>
+  <text class="zone-title" x="23" y="36">Workload container</text>
+  <rect class="zone" x="361" y="10" width="311" height="215" rx="9"/>
+  <text class="zone-title" x="377" y="36">Gateway container</text>
+  <g text-anchor="middle">
+    <rect class="box" x="29" y="56" width="187" height="60" rx="6"/>
+    <text class="role" x="122" y="81">Workload</text>
+    <text class="detail" x="122" y="101">Unprivileged client</text>
+    <rect class="box" x="393" y="56" width="246" height="60" rx="6"/>
+    <text class="role" x="516" y="81">Gateway parent</text>
+    <text class="detail" x="516" y="101">Ephemeral CA key in memory</text>
+    <path class="traffic" d="M216 74H390"/>
+    <text class="detail" x="302" y="64">Private CONNECT</text>
+    <rect class="box" x="393" y="161" width="246" height="46" rx="6"/>
+    <text class="role" x="516" y="181">Isolated grant worker</text>
+    <text class="detail" x="516" y="198">Leaf and TLS session keys</text>
+    <path class="traffic" d="M516 119V158" marker-start="url(#data)"/>
+    <rect class="box" x="230" y="247" width="200" height="60" rx="6"/>
+    <text class="role" x="330" y="272">Shared volume</text>
+    <text class="detail" x="330" y="292">Public CA certificate only</text>
+    <path class="ctrl" d="M393 104H330V244"/>
+    <path class="ctrl" d="M230 277H122V119"/>
+  </g>
+  <text class="label" x="322" y="180" text-anchor="end">Publish</text>
+  <text class="label" x="130" y="210">Read-only mount</text>
+  <text class="detail" x="529" y="145">Private IPC</text>
+  <g class="legend">
+    <path class="traffic" d="M470 262H500"/>
+    <text class="detail" x="510" y="266">Application traffic</text>
+    <path class="ctrl" d="M470 290H500"/>
+    <text class="detail" x="510" y="294">Control</text>
+  </g>
+</svg>
