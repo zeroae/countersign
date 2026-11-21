@@ -1,6 +1,6 @@
 # Tested platforms
 
-If you are evaluating Countersign for a desktop fleet, start with the provider and processor your users actually have. The runs below exercised implementation revision `fbb5aa7`. They distinguish a native TLS test, loading the packaged application, and driving an approval all the way to a website.
+If you are evaluating Countersign for a desktop fleet, start with the provider and processor your users actually have. Unless a section names its own revisions, the runs below exercised implementation revision `fbb5aa7`. They distinguish a native TLS test, loading the packaged application, and driving an approval all the way to a website.
 
 ## Native identity and desktop packages
 
@@ -26,4 +26,15 @@ On Linux the website key lives in the PKCS#11 provider. The Companion creates a 
 | Local Linux ARM64 conda installation | A locally built and installed Companion completed the two-certificate mTLS flow. The recipe currently builds for Linux. [Recorded run](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/docs/specs/2026-11-17-countersign-design.md#qualification-evidence) |
 | Shared Linux Gateway and issuer | Test workers with separate grant identities ran concurrently. Local CA and ACM-PCA API fixtures exercised exact-host leaf issuance. The SDK fixture checks signed API requests and a TLS handshake with the resulting leaf. [Shared runtime tests](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/crates/countersign-gateway/tests/runtime.py) · [Issuer tests](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/crates/countersign-gateway/src/shared_issuer.rs) |
 
-Full graphical pairing-to-website runs on Windows and macOS, physical smartcards and their PIN dialogs, other Linux keyrings, live AWS Private CA or ZAE-ZCM, production shared infrastructure and external protected sites remain unqualified. Signed Windows releases and macOS notarization also await credentials and a release run.
+## Gateway hosts and the worker sandbox
+
+The Gateway's [worker sandbox](../operate.md#choose-a-worker-sandbox) depends on the host's kernel, so a host is qualified for one `worker_sandbox` value at a time. This section lists the hosts the filter sandbox (`worker_sandbox: "filter"`) has been tested on, and which of them it is qualified on. Its runs exercised later revisions than `fbb5aa7`, named in each row.
+
+| Host | Processor | Filter sandbox | Evidence |
+|---|---|---|---|
+| ECS Fargate 1.4.0 | x86-64 | Qualified | End to end, on release [v0.2.1](https://github.com/zeroae/countersign/releases/tag/v0.2.1) (`7199c78`): a shared Gateway ran in a Fargate task with the Broker and an mTLS site. A paired Companion on a Linux ARM64 desktop approved two concurrent grants, and the mock MCP tool read the site's flag into chat for each. [Reporter's run](https://github.com/zeroae/countersign/issues/18#issuecomment-7066219942) · Harness, at revision `30bedc2`: kernel 6.1.190 with Landlock ABI v2, and the containment test and the runtime test under `"filter"` passed. [Harness run](https://github.com/zeroae/countersign/issues/24#issuecomment-7032499034) |
+| ECS Fargate 1.4.0 | arm64 | Harness only | Harness, at revision `30bedc2`: kernel 6.1.190 with Landlock ABI v2, and the containment test and the runtime test under `"filter"` passed. No end-to-end run with a Companion has been made. [Harness run](https://github.com/zeroae/countersign/issues/24#issuecomment-7032499034) |
+
+The harness runs the Gateway's containment test and its runtime test, with a test grant authority and mTLS site, inside a Fargate task that refuses namespaces. Maintainers rerun it for every release that touches the grant worker. [Fargate qualification harness](https://github.com/zeroae/countersign/tree/30bedc26b301997730c8f963611042677aa30a9a/qualification/fargate)
+
+Full graphical pairing-to-website runs on Windows and macOS, physical smartcards and their PIN dialogs, other Linux keyrings, live AWS Private CA or ZAE-ZCM, production shared infrastructure, external protected sites and an end-to-end run of the filter sandbox on Fargate arm64 remain unqualified. Signed Windows releases and macOS notarization also await credentials and a release run.
