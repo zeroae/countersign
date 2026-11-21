@@ -16,7 +16,10 @@ function broker() {
   };
   return b;
 }
-const job = fingerprint => JSON.stringify({ url: 'https://site.test:9444/', ok: true, fingerprint });
+// A job result as read() returns it: the file's text and when it was written.
+let written = 0;
+const job = fingerprint => ({ text: JSON.stringify({ url: 'https://site.test:9444/', ok: true, fingerprint }),
+  stamp: ++written });
 
 test('a job keeps the approval that was current when its result landed', async () => {
   const b = broker();
@@ -38,7 +41,8 @@ test('a job keeps the approval that was current when its result landed', async (
 test('a job read before anything noticed it pins the approval current at that read', async () => {
   const b = broker();
   b.approve('A', 'aaaa');
-  const jobs = jobApproval({ read: async () => job('aaaa'), current: b.lookup, status: b.status });
+  const ran = job('aaaa');
+  const jobs = jobApproval({ read: async () => ran, current: b.lookup, status: b.status });
   assert.equal((await jobs.forJob()).approval.id, 'A');
   b.approve('B', 'bbbb');
   assert.equal((await jobs.forJob()).approval.id, 'A');
@@ -55,4 +59,20 @@ test('no job, or a Broker that could not answer, leaves nothing pinned for good'
   assert.equal((await jobs.forJob()).approval, null);
   b.approve('A', 'aaaa');
   assert.equal((await jobs.forJob()).approval.id, 'A', 'the next read tries again');
+});
+
+test('a rerun that writes the same result again pins the approval current then', async () => {
+  const b = broker();
+  let file = null;
+  const jobs = jobApproval({ read: async () => file, current: b.lookup, status: b.status });
+  b.approve('A', 'aaaa');
+  file = job('bbbb'); // ran under A with another certificate: the fingerprints differ
+  await jobs.landed();
+  b.replace('A');
+  b.approve('B', 'bbbb'); // a renewal approves the job's certificate
+  file = job('bbbb'); // the rerun writes the same text
+  await jobs.landed();
+  const { text, approval } = await jobs.forJob();
+  assert.equal(text, file.text);
+  assert.equal(approval.id, 'B');
 });

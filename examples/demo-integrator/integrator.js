@@ -3,7 +3,7 @@
 import https from 'node:https';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { watchFile } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { contentSecurityPolicy, files, manifest } from './site-files.js';
 import { jobApproval } from './job-approval.js';
@@ -47,7 +47,11 @@ function lastJob(raw) {
 // host when the launcher records the job's result. The lookup never creates
 // an approval; a failed lookup leaves the result shown without one.
 const jobs=jobApproval({
-  read:()=>readFile(jobFile,'utf8').catch(()=>null),
+  // The mtime tells a rerun that wrote the same text from the last job.
+  read:async()=>{
+    try{const {mtimeMs}=await stat(jobFile);return {text:await readFile(jobFile,'utf8'),stamp:mtimeMs};}
+    catch{return null;}
+  },
   current:()=>broker('approvals/current',{binding,host}),
   status:id=>broker('status',{user:workload.user,id}),
 });
