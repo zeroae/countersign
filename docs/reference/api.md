@@ -51,6 +51,7 @@ All paths in this table start with `/v1/backend/` and use POST. A 204 response h
 | `pairings/forget` | `user`, `targets` array of current device bindings | 200 with the remaining devices. Removes the target pairings and withdraws their grants. |
 | `requests` | `binding`, `host` such as `ledger.partner.example:443` | 200 with `{"id":"…","state":"pending"}` or an existing matching approved record. An explicit request can retry a previously denied, cancelled or expired scope. |
 | `status` | `user`, `id` | 200 with the status and observations described below. |
+| `approvals/current` | `binding`, `host` | 200 with the `status` view of that Workload's current approval for the host: the one its Gateway traffic uses, including one the Workload's own connection started. 404 `unavailable` when it has none. Unlike `requests`, it never creates an approval. A pending renewal becomes current only once approved. |
 | `renew` | `binding`, `id` of the live approved request | 200 with the new pending approval ID. The previous grant remains usable until its deadline or a successful replacement. |
 | `revoke` | `user`, `id` | 204. Records withdrawal and cancels an outstanding renewal for that approval. Repeat calls for the same owned record are idempotent. |
 | `workloads/retire` | `binding` | 204. Retires that Workload generation. |
@@ -67,6 +68,13 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
   "id": "85b80155-ac10-487f-a024-5216ec7f8ced",
   "state": "approved",
   "ready": true,
+  "expires_at_ms": 1795470000000,
+  "certificate": {
+    "sha256": "c64a4b8b8bcdac1a7ac2bedcd13c520f4abfc07d5765d68df67f56ed0058f00b",
+    "subject": "CN=Demo user",
+    "issuer": "CN=Countersign demo client-ca",
+    "not_after_ms": 1795635570000
+  },
   "upstream_mtls_accepted": false,
   "ingress_closed_count": 0,
   "egress_closed_count": 0
@@ -75,6 +83,10 @@ Take device bindings directly from a fresh `devices` response. Each contains `pa
 
 - `state` is `pending`, `approved`, `denied`, `cancelled`, `expired` or `replaced`. A pending offer has a ten-minute deadline. A successful renewal changes the predecessor's state to `replaced`.
 - `ready` means the winning Companion acknowledged activation and its matching channel is currently connected. An approved grant can have `ready: false` while that Companion is offline.
+- `expires_at_ms` and `certificate` describe the grant the user approved. They appear once an approval has a grant, and stay after it ends (`expired`, `cancelled` or `replaced`); a renewal's successor has its own approval ID and its own values. They are absent when the approval never had a grant: it is `pending`, `denied`, or it was `expired` or `cancelled` before anyone approved it. They are also absent once the [audit retention](config.md) period removes an ended approval's grant record.
+- `expires_at_ms` is the deadline the user approved, in milliseconds since the Unix epoch, in whole seconds. It is not always when access ends: a revocation, a renewal or a Gateway lease can end it sooner, and `state` says whether the grant is still in force.
+- `certificate.sha256` is the lowercase hex SHA-256 of the client certificate the user selected (its DER encoding). It is the fingerprint the Companion shows, without its spaces, of the certificate the protected site receives in the handshake.
+- `certificate.subject` and `certificate.issuer` are that certificate's distinguished names, written in the order the certificate encodes them and joined with `, ` (often most general first, such as `C=US, O=Acme, CN=Jane`, the reverse of RFC 4514), and `certificate.not_after_ms` is its own expiry, in milliseconds since the Unix epoch. A grant recorded by a Broker older than these fields has `sha256` alone. A matching subject does not identify the key; compare `sha256`.
 - `upstream_mtls_accepted` is historical. It becomes true after the Gateway reports receiving upstream HTTP response headers on an authenticated connection.
 - `ingress_closed_count` and `egress_closed_count` count distinct reported socket closures on the two legs. Reports are best effort. Enforcers cut traffic at their local lease deadline even if they cannot report back. [Gateway observations](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/crates/countersign-broker/src/service/observations.rs)
 

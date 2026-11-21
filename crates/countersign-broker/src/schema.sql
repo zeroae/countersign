@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS approved_grant (
     approval TEXT NOT NULL UNIQUE REFERENCES approval(id),
     offer TEXT NOT NULL UNIQUE REFERENCES offer(id),
     certificate BLOB NOT NULL CHECK (length(certificate) = 32),
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    -- The selected leaf's names and own not-after; NULL for grants recorded
+    -- before the Broker kept them.
+    subject TEXT, issuer TEXT, not_after INTEGER
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS decision (

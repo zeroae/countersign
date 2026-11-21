@@ -36,6 +36,20 @@ impl SqliteApprovalStore {
             }
             tx.pragma_update(None, "user_version", 1)?;
         }
+        // Grants gained the leaf's names without a version bump, so a Broker
+        // that predates them can still open the store and ignores them.
+        let has_subject: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('approved_grant') WHERE name='subject')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_subject {
+            tx.execute_batch(
+                "ALTER TABLE approved_grant ADD COLUMN subject TEXT;
+                 ALTER TABLE approved_grant ADD COLUMN issuer TEXT;
+                 ALTER TABLE approved_grant ADD COLUMN not_after INTEGER;",
+            )?;
+        }
         tx.commit()?;
         Ok(Self { connection })
     }
@@ -496,14 +510,17 @@ impl ApprovalStore for SqliteApprovalStore {
                         .not_after_unix_seconds
                         .min(at + i64::from(duration_seconds.get()));
                     tx.execute(
-                        "INSERT INTO approved_grant (id, approval, offer, certificate, expires_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        "INSERT INTO approved_grant (id, approval, offer, certificate, expires_at, subject, issuer, not_after)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         params![
                             Uuid::new_v4().to_string(),
                             approval_id.to_string(),
                             offer_text,
                             certificate.sha256,
-                            expiry
+                            expiry,
+                            certificate.subject,
+                            certificate.issuer,
+                            certificate.leaf_not_after_unix_seconds
                         ],
                     )?;
                     "approved"

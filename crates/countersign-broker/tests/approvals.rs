@@ -72,6 +72,9 @@ fn approve(cert: u8, seconds: u32) -> Decision {
         certificate: ValidatedCertificate {
             sha256: [cert; 32],
             not_after_unix_seconds: i64::MAX,
+            subject: "CN=user".into(),
+            issuer: "CN=issuer".into(),
+            leaf_not_after_unix_seconds: i64::MAX,
         },
         duration_seconds: NonZeroU32::new(seconds).unwrap(),
     }
@@ -260,6 +263,9 @@ fn expired_requests_cannot_create_grants_and_validation_cannot_extend_consent() 
         certificate: ValidatedCertificate {
             sha256: [9; 32],
             not_after_unix_seconds: expiry,
+            subject: "CN=user".into(),
+            issuer: "CN=issuer".into(),
+            leaf_not_after_unix_seconds: expiry,
         },
         duration_seconds: NonZeroU32::new(7200).unwrap(),
     };
@@ -448,4 +454,42 @@ fn opening_preview_database_migrates_lease_fences_transactionally() {
     assert_eq!(inspect.query_row("SELECT count(*) FROM pragma_table_info('enforcer_issue') WHERE name IN ('closed','generation','sequence')",[],|r|r.get::<_,i64>(0)).unwrap(),3);
     inspect.pragma_update(None, "user_version", 99).unwrap();
     assert!(SqliteApprovalStore::open(&path).is_err());
+}
+
+#[test]
+fn opening_an_older_store_adds_the_leaf_columns_to_existing_grants() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("authority.db");
+    {
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE approved_grant (
+                id TEXT PRIMARY KEY NOT NULL,
+                approval TEXT NOT NULL UNIQUE REFERENCES approval(id),
+                offer TEXT NOT NULL UNIQUE REFERENCES offer(id),
+                certificate BLOB NOT NULL CHECK (length(certificate) = 32),
+                expires_at INTEGER NOT NULL
+            ) STRICT;
+            PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    }
+    for _ in 0..2 {
+        drop(SqliteApprovalStore::open(&path).unwrap());
+    }
+    let db = Connection::open(&path).unwrap();
+    let columns: Vec<String> = db
+        .prepare("SELECT name FROM pragma_table_info('approved_grant')")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    for column in ["subject", "issuer", "not_after"] {
+        assert!(columns.iter().any(|c| c == column), "{columns:?}");
+    }
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 1, "an older Broker can still open the store");
 }

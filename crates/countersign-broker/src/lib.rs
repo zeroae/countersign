@@ -94,7 +94,13 @@ pub struct Offer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ValidatedCertificate {
     pub sha256: [u8; 32],
+    /// The earliest not-after across the selected chain, which caps the grant.
     pub not_after_unix_seconds: i64,
+    /// The selected leaf's own subject, issuer and not-after, which the
+    /// approval status call reports.
+    pub subject: String,
+    pub issuer: String,
+    pub leaf_not_after_unix_seconds: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

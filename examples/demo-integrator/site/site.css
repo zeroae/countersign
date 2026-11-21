@@ -59,7 +59,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .btn.ghost { background: transparent; color: var(--brand); }
 .btn.danger { background: transparent; border-color: var(--bad-line); color: var(--bad-ink); }
 .btn:disabled { opacity: .55; cursor: default; }
-.small-btn { min-height: 36px; align-self: flex-start; }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
@@ -118,7 +117,6 @@ countersign-widget { --countersign-font: var(--sans); }
 .pair-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .peer { padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .fp { font: 400 13px/1.5 var(--mono); word-break: break-all; }
-.fp-input { font: 400 13px/1.5 var(--mono); padding: 8px 12px; resize: vertical; word-break: break-all; }
 .verdict { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 8px 12px; border-radius: 8px;
   border: 1px solid; font-size: 14px; font-weight: 600; }
 .verdict svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }

@@ -213,6 +213,7 @@ impl Service {
             .route("/v1/backend/pairings/confirm", post(backend::confirm))
             .route("/v1/backend/requests", post(backend::request))
             .route("/v1/backend/status", post(backend::status))
+            .route("/v1/backend/approvals/current", post(backend::current))
             .route("/v1/backend/revoke", post(backend::revoke))
             .route("/v1/backend/renew", post(backend::renew))
             .route("/v1/backend/contexts/close", post(controls::close_context))

@@ -2,26 +2,38 @@
   "access-active-dark.png": {
     "scale": 2,
     "width": 960,
-    "height": 764,
+    "height": 824,
     "boxes": {
       "progress": [
         49,
         409.3,
         574.8,
         448.3
+      ],
+      "ends": [
+        49,
+        542.3,
+        307.9,
+        588.3
       ]
     }
   },
   "access-active.png": {
     "scale": 2,
     "width": 960,
-    "height": 764,
+    "height": 824,
     "boxes": {
       "progress": [
         49,
         409.3,
         574.8,
         448.3
+      ],
+      "ends": [
+        49,
+        542.3,
+        307.9,
+        588.3
       ]
     }
   },
@@ -418,38 +430,38 @@
   "job-result-dark.png": {
     "scale": 2,
     "width": 960,
-    "height": 663,
+    "height": 630,
     "boxes": {
       "compare": [
         49,
         296.3,
         911,
-        451.4
+        417.5
       ],
       "match": [
         49,
-        467.4,
+        433.5,
         462.5,
-        506.4
+        472.5
       ]
     }
   },
   "job-result.png": {
     "scale": 2,
     "width": 960,
-    "height": 663,
+    "height": 630,
     "boxes": {
       "compare": [
         49,
         296.3,
         911,
-        451.4
+        417.5
       ],
       "match": [
         49,
-        467.4,
+        433.5,
         462.5,
-        506.4
+        472.5
       ]
     }
   },

@@ -161,24 +161,91 @@ pub(super) async fn status(
     Json(req): Json<Owned>,
 ) -> Result<Json<Value>> {
     auth(&s, &h)?;
-    s.apply(move |a| {
-        let row = a.store.connection.query_row(
+    s.apply(move |a| view(a, req.id.as_str(), req.user.as_str()).map(Json))
+        .await
+}
+/// The approval status view of approval `id`, owned by `user` under this Integrator.
+fn view(a: &Authority, id: &str, user: &str) -> Result<Value> {
+    let row = a.store.connection.query_row(
             "SELECT CASE WHEN state='pending' AND pending_until<=unixepoch() THEN 'expired'
              WHEN state='approved' AND g.expires_at<=unixepoch() THEN 'expired' ELSE state END,
              g.id, EXISTS(SELECT 1 FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='mtls_accepted'),
              (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='ingress_closed'),
-             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed')
+             (SELECT count(*) FROM gateway_observation o WHERE o.grant_id=g.id AND o.observation='egress_closed'),
+             g.expires_at, lower(hex(g.certificate)), g.subject, g.issuer, g.not_after
              FROM approval a LEFT JOIN approved_grant g ON g.approval=a.id
              WHERE a.id=?1 AND a.integrator=?2 AND a.owner=?3",
-            params![req.id.as_str(),a.integrator.as_str(),req.user.as_str()],
-            |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?)),
+            params![id,a.integrator.as_str(),user],
+            |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,bool>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,
+                r.get::<_,Option<i64>>(5)?,r.get::<_,Option<String>>(6)?,
+                (r.get::<_,Option<String>>(7)?,r.get::<_,Option<String>>(8)?,r.get::<_,Option<i64>>(9)?))),
         ).optional()?.ok_or(Fault::Unavailable)?;
-        let (state, grant, accepted, ingress_closed, egress_closed) = row;
-        let ready = state=="approved" && grant.and_then(|id|a.grants.get(&id)).is_some_and(|g|{
-            g.acknowledged && a.peers.get(g.activation.grant.device.pairing.as_str()).is_some_and(|p|p.binding==g.activation.grant.device)
+    let (
+        state,
+        grant,
+        accepted,
+        ingress_closed,
+        egress_closed,
+        expires_at,
+        certificate_sha256,
+        leaf,
+    ) = row;
+    let ready = state == "approved"
+        && grant.and_then(|id| a.grants.get(&id)).is_some_and(|g| {
+            g.acknowledged
+                && a.peers
+                    .get(g.activation.grant.device.pairing.as_str())
+                    .is_some_and(|p| p.binding == g.activation.grant.device)
         });
-        Ok(Json(json!({"id":req.id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed})))
-    }).await
+    let mut view = json!({"id":id,"state":state,"ready":ready,"upstream_mtls_accepted":accepted,"ingress_closed_count":ingress_closed,"egress_closed_count":egress_closed});
+    // A grant row outlives its approval's end (expired, replaced, cancelled), so these
+    // keep describing the grant that was approved; an approval that never had one omits them.
+    if let (Some(expires_at), Some(sha256)) = (expires_at, certificate_sha256) {
+        view["expires_at_ms"] = json!(expires_at.checked_mul(1000).ok_or(Fault::Storage)?);
+        view["certificate"] = json!({"sha256": sha256});
+        // A grant recorded before the Broker kept the leaf's names has none.
+        if let (Some(subject), Some(issuer), Some(not_after)) = leaf {
+            view["certificate"]["subject"] = json!(subject);
+            view["certificate"]["issuer"] = json!(issuer);
+            view["certificate"]["not_after_ms"] =
+                json!(not_after.checked_mul(1000).ok_or(Fault::Storage)?);
+        }
+    }
+    Ok(view)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Lookup {
+    binding: w::WorkloadBinding,
+    host: Origin,
+}
+/// The Workload's current approval for `host`, the one its Gateway traffic
+/// uses, as the status call shows it. Unlike `requests`, it never creates one.
+pub(super) async fn current(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Json(req): Json<Lookup>,
+) -> Result<Json<Value>> {
+    auth(&s, &h)?;
+    s.apply(move |a| {
+        // Only this Integrator's own Workloads have a current approval here.
+        if req.binding.integrator != a.integrator {
+            return Err(Fault::Unavailable);
+        }
+        let scope = a.policy.scope_for(&req.host).ok_or(Fault::Unavailable)?;
+        let b = &req.binding;
+        let id: String = a.store.connection.query_row(
+            "SELECT id FROM approval WHERE current=1 AND integrator=?1 AND owner=?2 AND context=?3
+             AND workload=?4 AND workload_generation=?5 AND entry_id=?6 AND entry_version=?7 AND scope=?8",
+            params![a.integrator.as_str(),b.user.as_str(),b.context.as_str(),b.workload.as_str(),
+                i64::try_from(b.workload_generation.get()).map_err(|_|Fault::Invalid)?,
+                scope.entry_id(),i64::try_from(scope.entry_version()).map_err(|_|Fault::Invalid)?,
+                scope.pattern().to_string()],
+            |r| r.get(0),
+        ).optional()?.ok_or(Fault::Unavailable)?;
+        view(a, &id, b.user.as_str()).map(Json)
+    })
+    .await
 }
 pub(super) async fn revoke(
     State(s): State<Service>,

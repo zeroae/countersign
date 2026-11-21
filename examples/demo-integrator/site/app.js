@@ -8,12 +8,19 @@ const widget = document.querySelector('countersign-widget');
 const PENDING_MS = 10 * 60 * 1000; // the Broker's deadline for a pending offer
 const REMEMBER = 'harbor-ledger-approval';
 const page = { session: null, devices: [], id: null, status: null, requestedAt: null,
-  revoked: false, renewal: false, justPaired: false, requestShown: false, timer: 0 };
+  revoked: false, renewal: false, justPaired: false, requestShown: false, timer: 0, tick: 0 };
 
 const show = msg => { $('message').textContent = msg; };
 const fill = (selector, value) => { for (const node of document.querySelectorAll(selector)) node.textContent = value; };
 const short = id => String(id).slice(0, 8);
 const clock = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const pad = n => String(n).padStart(2, '0');
+// Time left as h:mm:ss, or m:ss under an hour.
+function left(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return (h ? h + ':' + pad(m) : m) + ':' + pad(s % 60);
+}
 
 async function post(path, body = {}) {
   const res = await fetch('/api/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json',
@@ -112,10 +119,22 @@ function render() {
     forget.href = '/countersign/devices?pairing=' + encodeURIComponent(device.binding.pairing);
     forget.textContent = 'Forget Companion ' + short(device.binding.pairing) + ' and revoke its grants';
   }
+  renderDeadline(current);
   const [title, body] = ending(status?.state, host);
   $('ended-title').textContent = title;
   $('ended-body').textContent = body;
   renderDevices();
+}
+
+// The grant's approved deadline. The Broker's status says when it ends early.
+function renderDeadline(current) {
+  clearInterval(page.tick);
+  const until = current === 'active' ? page.status?.expires_at_ms : null;
+  $('access-ends-row').hidden = !until;
+  if (!until) return;
+  const tick = () => { $('access-ends').textContent = left(until - Date.now()) + ' left · until ' + clock(until); };
+  tick();
+  page.tick = setInterval(tick, 1000);
 }
 
 function renderDevices() {
@@ -164,7 +183,7 @@ async function refresh() {
 
 async function showJob() {
   const { session } = page;
-  const { result } = await post('job');
+  const { result, approval } = await post('job');
   $('job-eyebrow').textContent = 'Job ' + session.workload + ' · ' + (session.title || session.context);
   $('job-empty').hidden = !!result;
   $('job-peer').hidden = !result?.ok;
@@ -185,6 +204,16 @@ async function showJob() {
   }
   $('job-fingerprint').textContent = result.fingerprint;
   $('job-subject').textContent = 'Subject: ' + result.subject;
+  // The backend reads the Workload's current approval from the Broker, which
+  // names the certificate the user approved; compare it with the one the site
+  // received, so nobody has to copy a fingerprint.
+  const approved = approval?.certificate;
+  $('job-approved').textContent = approved?.sha256 ?? '';
+  $('job-approved-subject').textContent = approved?.subject ? 'Subject: ' + approved.subject : '';
+  const same = approved?.sha256 === result.fingerprint;
+  $('no-compare').hidden = !!approved;
+  $('match').hidden = !approved || !same;
+  $('mismatch').hidden = !approved || same;
 }
 
 async function load() {
@@ -228,13 +257,6 @@ $('pair').onsubmit = perform(async () => {
   render();
   show('Confirm the account in Countersign.');
 });
-$('compare').onsubmit = e => {
-  e.preventDefault();
-  const typed = $('selected').value.replace(/[^0-9a-f]/gi, '').toLowerCase();
-  const same = typed === $('job-fingerprint').textContent;
-  $('match').hidden = !same;
-  $('mismatch').hidden = same || !typed;
-};
 for (const button of document.querySelectorAll('[data-act=status]')) button.onclick = perform(refresh);
 document.querySelector('[data-act=renew]').onclick = perform(async () => {
   const { id } = await post('renew', { id: page.id });

@@ -2,5 +2,5 @@
   "name": "@countersign/demo-integrator",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node integrator.js", "lint": "eslint *.js site/*.js", "test": "node --test" }
+  "scripts": { "start": "node integrator.js", "lint": "eslint *.js site/*.js test/*.js", "test": "node --test" }
 }
