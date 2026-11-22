@@ -1,0 +1,44 @@
+# The opt-in Squid variant: compose_demo.py --squid layers this file over
+# compose.yaml. The Gateway reaches the site only through a real Squid.
+services:
+  site:
+    # The site leaves the backend network for site-host's, which only Squid
+    # shares. Stopping the site leaves its name and address behind, so Squid's
+    # connection is refused, as for a site whose server is down.
+    networks: !reset {}
+    network_mode: service:site-host
+  site-host:
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "${CS_DEMO_UID:?run compose_demo.py}:${CS_DEMO_GID:?run compose_demo.py}"
+    image: countersign-demo/integrator:local
+    command: [sleep, infinity]
+    networks:
+      remote:
+        aliases: [site.test]
+  squid:
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "${CS_DEMO_UID:?run compose_demo.py}:${CS_DEMO_GID:?run compose_demo.py}"
+    image: ubuntu/squid:6.6-24.04_edge@sha256:d9c34c5ab74c6dd41cf1070d9b4221aac072e67e983527ca2d41512958f77506
+    # Squid in the foreground, without the image's log-tailing entrypoint.
+    entrypoint: [/usr/sbin/squid, -N, -f, /etc/squid/countersign/squid.conf]
+    tmpfs:
+      - /run/squid:rw,noexec,nosuid,size=64k,uid=${CS_DEMO_UID},gid=${CS_DEMO_GID},mode=0700
+      - /tmp:rw,noexec,nosuid,size=16m,uid=${CS_DEMO_UID},gid=${CS_DEMO_GID},mode=0700
+    volumes:
+      - ${CS_DEMO_STATE}/squid:/etc/squid/countersign:ro
+      - ${CS_DEMO_STATE}/squid-log:/var/log/squid
+    healthcheck:
+      test: [CMD, /usr/sbin/squid, -f, /etc/squid/countersign/squid.conf, -k, check]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    networks: [backend, remote]
+
+networks:
+  remote: {internal: true}

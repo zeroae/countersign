@@ -122,6 +122,31 @@ On a proxied route the egress proxy's ACLs are the site's address policy, and th
 - allow a private site only on its own prefixes, where you want the check `private_networks` gave on a direct route;
 - pass TLS through without interception. An egress proxy that terminates TLS cannot present the site's certificate, so the request fails.
 
+In Squid these are `http_access` rules, read from the top, and the first that matches decides. The example below allows `api.partner.example:443`, and a private site, `billing.corp.example:443`, only on its prefix `10.30.0.0/24`. The rule for each of them has no `private_networks`. The Compose demo's Squid variant qualified the Gateway against these rules, with its one site, pinned to its address, in place of these two ([`squid.conf`](https://github.com/zeroae/countersign/blob/main/examples/demo-integrator/squid.conf)).
+
+```squid
+http_port 3128
+
+acl CONNECT method CONNECT
+acl tls_port port 443
+acl partner_api dstdomain api.partner.example
+acl billing dstdomain billing.corp.example
+acl billing_prefixes dst 10.30.0.0/24
+acl to_metadata dst 169.254.169.254 fd00:ec2::254 168.63.129.16
+acl to_link_local dst 169.254.0.0/16 fe80::/10
+acl to_loopback dst 127.0.0.0/8 ::1
+
+http_access deny !CONNECT
+http_access deny to_metadata
+http_access deny to_link_local
+http_access deny to_loopback
+http_access allow CONNECT partner_api tls_port
+http_access allow CONNECT billing tls_port billing_prefixes
+http_access deny all
+```
+
+The blocks come before the allow rules, so they hold even for an allowed name whose DNS answer is a metadata, link-local or loopback address. `http_port` has no `ssl-bump` option, so Squid passes the TLS bytes through unread. Squid 6.14 refuses a `CONNECT` these rules deny with 403, which the Workload reads as `proxy_denied`, and answers 503 when it cannot connect to the site, which the Workload reads as `upstream_failure`. A `dst` ACL does not match a name Squid cannot resolve, so a pinned site whose name does not resolve is refused with 403 too. When the site's address stops answering, Squid answers 503 only after its `connect_timeout`, one minute by default. The Gateway allows a Workload's `CONNECT` 120 seconds in all, the wait for approval included, so a lower `connect_timeout` leaves the Workload time to read `upstream_failure`.
+
 A wildcard rule behind the egress proxy reaches every host under it that the proxy allows, private ones included: on a direct route the Gateway refuses a wildcard rule for a private site, but through the proxy it cannot tell that a site is private. The Gateway also cannot stop the egress proxy from opening a tunnel to any address its ACLs allow.
 
 The egress proxy itself normally sits on a private address, such as an internal load balancer. `private_networks` and the special-use blocks do not apply to it. `denied_networks` does: an answer for the proxy's name inside it is never used.

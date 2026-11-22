@@ -47,6 +47,29 @@ That container has the CI runner's kernel. To run the same two tests on real ECS
 
 For the graphics and network path, run the [demo walkthrough](try.md) with `--verify` to automate the installed Companion and browser. The hosted end-to-end job also runs a separate harness that selects identities from candidate lists of different sizes, verifies the peer fingerprint and checks revocation. The native qualification jobs generate identities in disposable provider stores. On macOS and Windows use a disposable runner account for that harness because it changes user-level keychain or certificate-store state. [End-to-end workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/e2e.yml) · [Native qualification workflow](https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/.github/workflows/native.yml)
 
+### Qualify the Gateway against a real Squid
+
+The demo launcher's Squid variant puts a real Squid between the Gateway and the site, as the Gateway's [egress proxy](operate.md#reach-sites-through-an-egress-proxy). Run it by hand before a release that touches the Gateway's route to a site; no workflow runs it. It needs what the [demo walkthrough](try.md) needs, with the same virtual environment, and pulls the Squid image. From the checkout root, on a desktop session:
+
+```sh
+.venv/bin/python examples/demo-integrator/compose_demo.py --squid --verify \
+  --app "$PWD/packages/companion/dist/linux-arm64-unpacked/countersign-companion"
+```
+
+Without a desktop session, run it under a virtual display, as the end-to-end workflow runs its harness: `dbus-run-session -- xvfb-run -a .venv/bin/python examples/demo-integrator/compose_demo.py --squid --verify --app ...`. Without `--verify` the variant runs the interactive walkthrough through Squid.
+
+`--squid` layers `compose.squid.yaml` over the default `compose.yaml`, which it leaves unchanged. The Gateway shares the backend network with the Broker and Squid, and the site moves to a network only Squid shares. The site runs in the network of a placeholder container, `site-host`, so stopping the site leaves its name and address in place, as for a site whose server is down. The Gateway's configuration names `http://squid:3128` as its `egress_proxy`, and its rule for the site has no `private_networks`. Squid allows `CONNECT` only to `site.test:9444` on the site's address, blocks metadata, link-local and loopback addresses, and does no TLS interception: its configuration is `examples/demo-integrator/squid.conf`.
+
+`--verify` drives the real Companion and browser, as for the default walkthrough, and fails on the first check that does not hold. Before the approval it checks that the Gateway logged the egress proxy and that it can neither resolve `site.test` nor connect to the site's address. From the approved request it correlates Squid's access log line `TCP_TUNNEL/200` for `CONNECT site.test:9444` to the site's address, the fingerprint the site returned, which must equal the one approved in the Companion, and the response the Workload read. Then, with that grant still live and no second approval, the Workload repeats its request three times. Each must end in 502 with the `Countersign-Error` below, and the Gateway must log it under the same `Countersign-Request-ID`.
+
+| Step | `Countersign-Error` | What Squid logs |
+| --- | --- | --- |
+| The launcher swaps Squid's rule to refuse the site and reconfigures it | `proxy_denied` | `TCP_DENIED/403` with `HIER_NONE`: it opened no connection to the site |
+| It restores the rule and stops the site | `upstream_failure` | `TCP_TUNNEL/503`: the site's address refused the connection |
+| It stops Squid | `proxy_unavailable` | Nothing |
+
+The variant was qualified against Squid 6.14, as `squid -v` reports it, from the image `ubuntu/squid:6.6-24.04_edge@sha256:d9c34c5ab74c6dd41cf1070d9b4221aac072e67e983527ca2d41512958f77506`, on Linux arm64. The tag names Ubuntu's original Squid version; the image's package is newer. `compose.squid.yaml` pins that digest. To qualify another Squid, change the image there, run the variant and record the version the run prints on its `Egress proxy:` line here.
+
 ## A grant worker died of SIGSYS
 
 The worker sandbox's filter kills a grant worker with `SIGSYS` when it makes a system call outside the allow-list, or a listed call with an argument the list refuses. One call is the exception: `clone3` fails as unsupported and kills nothing. The Gateway logs `grant worker killed by the worker sandbox's filter (SIGSYS); grant fenced`, which does not say which call it was. Two commands do.
