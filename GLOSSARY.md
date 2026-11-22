@@ -4,6 +4,12 @@ Desktop approval for HTTPS Workloads that use an installed client certificate. T
 
 ## Language
 
+### Gateway egress
+
+**Egress proxy**:
+The operator's HTTP proxy that the Gateway must go through to reach a protected site, which carries the encrypted connection without reading it.
+_Avoid_: upstream proxy, outbound proxy, Squid
+
 ### Gateway isolation
 
 **Grant worker**:
