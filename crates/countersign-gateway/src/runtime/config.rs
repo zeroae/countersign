@@ -117,6 +117,7 @@ impl EgressProxy {
         };
         if parsed.scheme() != "http"
             || !written_port
+            || port == 0
             || parsed.path() != "/"
             || parsed.query().is_some()
             || parsed.fragment().is_some()

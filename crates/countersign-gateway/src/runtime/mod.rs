@@ -917,13 +917,14 @@ pub async fn run(args: &[String]) -> Result<()> {
         Some(outer) => eprintln!("Gateway worker sandbox \"{sandbox}\": {outer}, {layers}"),
         None => eprintln!("Gateway worker sandbox \"{sandbox}\": {layers}"),
     }
+    let policy = config.policy()?;
+    // Only once the destinations it names have passed their checks.
     if let Some(proxy) = &config.egress_proxy {
         eprintln!(
             "Gateway egress proxy {proxy} {}",
             config.left_to_egress_proxy()
         );
     }
-    let policy = config.policy()?;
     let broker = Broker::new(&config)?;
     let (issuer, tls) = if let Some(shared) = &config.shared {
         let issuer = SharedIssuer::open(shared.ca.clone(), policy.clone()).await?;

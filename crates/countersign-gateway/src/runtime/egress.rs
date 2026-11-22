@@ -60,24 +60,54 @@ pub async fn tunnel(proxy: &EgressProxy, origin: &Origin, denied: &[IpNet]) -> R
     stream
         .write_all(format!("CONNECT {origin} HTTP/1.1\r\nHost: {origin}\r\n\r\n").as_bytes())
         .await?;
-    let mut head = Vec::with_capacity(128);
-    while !head.ends_with(b"\r\n\r\n") {
-        if head.len() >= MAX_HEAD {
-            return Err(invalid("egress proxy answer exceeds the limit"));
-        }
-        // One byte at a time, so no byte of the tunnel is consumed.
-        head.push(stream.read_u8().await?);
-    }
-    match status(&head) {
-        Some(code) if (200..300).contains(&code) => Ok(stream),
-        Some(code) => Err(ProxyAnswer(code).into()),
-        None => Err(invalid("egress proxy gave no HTTP answer")),
+    match answer(&mut stream).await? {
+        200..=299 => Ok(stream),
+        code => Err(ProxyAnswer(code).into()),
     }
 }
 
-fn status(head: &[u8]) -> Option<u16> {
-    let line = head.split(|&b| b == b'\n').next()?;
-    let line = std::str::from_utf8(line).ok()?.strip_suffix('\r')?;
+/// Reads the egress proxy's answer to the `CONNECT` and returns its status
+/// code. It reads past the status line only for a 2xx answer, up to the head's
+/// end, and gives up as soon as the bytes cannot be an HTTP answer: a proxy
+/// that keeps the connection open after any other answer gets no wait.
+async fn answer(stream: &mut TcpStream) -> Result<u16> {
+    const VERSION: &[u8] = b"HTTP/1.";
+    let not_http = || invalid("egress proxy gave no HTTP answer");
+    let mut line = Vec::with_capacity(64);
+    let mut code = None;
+    for _ in 0..MAX_HEAD {
+        // One byte at a time, so no byte of the tunnel is consumed.
+        let byte = stream.read_u8().await?;
+        if byte != b'\n' {
+            line.push(byte);
+            if code.is_none() && !line.starts_with(VERSION) && !VERSION.starts_with(&line) {
+                return Err(not_http());
+            }
+            continue;
+        }
+        // A line ends at LF, with or without CR before it (RFC 9112, 2.2).
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        match code {
+            None => {
+                let status = status(&line).ok_or_else(not_http)?;
+                if !(200..300).contains(&status) {
+                    return Ok(status);
+                }
+                code = Some(status);
+            }
+            Some(status) if line.is_empty() => return Ok(status),
+            Some(_) => {}
+        }
+        line.clear();
+    }
+    Err(invalid("egress proxy answer exceeds the limit"))
+}
+
+/// The status code of a status line, given without its line end.
+fn status(line: &[u8]) -> Option<u16> {
+    let line = std::str::from_utf8(line).ok()?;
     let mut parts = line.splitn(3, ' ');
     if !matches!(parts.next()?, "HTTP/1.1" | "HTTP/1.0") {
         return None;

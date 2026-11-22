@@ -242,8 +242,15 @@ ERROR_PAGE = b'content-type: text/html\r\ncontent-length: %d\r\n\r\n%s' % (len(P
 
 # Names whose proxied leg fails, one for each way: the test-only egress proxy refuses, closes
 # unanswered, answers with something that is not HTTP, cannot reach the site, or tunnels to a
-# site whose certificate is for another name.
-PROXY_FAILURES = ['refused', 'closed', 'garbled', 'unreachable', 'wrong']
+# site whose certificate is for another name. For `banner`, `stub` and `lf` it answers and then
+# keeps the connection open: a line that is not HTTP, a few bytes that are not, and a refusal
+# whose lines end in a bare LF.
+PROXY_FAILURES = ['refused', 'closed', 'garbled', 'banner', 'stub', 'lf', 'unreachable', 'wrong']
+
+
+class KeptOpen(bytes):
+    """An answer after which the test-only egress proxy keeps the connection open until the
+    Gateway closes it."""
 
 
 class Tunnel(socketserver.BaseRequestHandler):
@@ -266,8 +273,12 @@ class Tunnel(socketserver.BaseRequestHandler):
             self.request.sendall(b'HTTP/1.1 403 Forbidden\r\n' + ERROR_PAGE)
             return
         if isinstance(address, bytes):
-            # This answer and no other, then the end of the connection.
+            # This answer and no other, then the end of the connection: the proxy's, or for an
+            # answer kept open, the Gateway's.
             self.request.sendall(address)
+            if isinstance(address, KeptOpen):
+                with contextlib.suppress(OSError):
+                    self.request.recv(1)
             return
         try:
             site = socket.create_connection(address if isinstance(address, tuple) else (address, int(port)),
@@ -391,10 +402,17 @@ def egress_configuration(dir, binary, config):
     for proxy in ('http://user:secret@proxy.test:3128', 'http://user@proxy.test:3128'):
         error = refused(proxy)
         assert 'egress_proxy' in error and 'credentials' in error and 'secret' not in error, error
-    for proxy in ('http://proxy.test', 'http://proxy.test:', 'http://[::1]', 'http://proxy.test:3128/path', 'http://proxy.test:3128?q', 'ftp://proxy.test:3128',
+    for proxy in ('http://proxy.test', 'http://proxy.test:', 'http://proxy.test:0', 'http://[::1]', 'http://proxy.test:3128/path', 'http://proxy.test:3128?q', 'ftp://proxy.test:3128',
                   'proxy.test:3128', ''):
         assert 'egress_proxy' in refused(proxy), proxy
     refused(3128)
+    # The startup line says which destinations leave their address policy to the egress proxy,
+    # so a configuration whose destinations fail their checks never prints it.
+    wildcard = {**base, 'id': 'wild', 'pattern': '*.' + base['pattern'].split('.', 1)[1], 'egress': 'direct'}
+    path.write_text(json.dumps({**config, 'egress_proxy': 'http://proxy.test:3128', 'destinations': [rule, wildcard]}))
+    result = subprocess.run([binary, 'serve', str(path)], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and 'exact host and prefix' in result.stderr, result
+    assert 'Gateway egress proxy' not in result.stderr, result.stderr
     # A rule's `egress` takes one value, with or without an egress proxy.
     direct = {**base, 'egress': 'direct'}
     assert loads(**direct) and loads('http://proxy.test:3128', **direct)
@@ -656,6 +674,12 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 fails_through_egress(failing['closed'], 'proxy_unavailable')
                 fails_through_egress(failing['garbled'], 'proxy_unavailable')
                 assert egress.take() == [f'CONNECT {failing[name]} HTTP/1.1' for name in ('closed', 'garbled')]
+                # It answers and keeps the connection open. The Workload reads why at once, inside
+                # `connect`'s timeout, never at the Gateway's 120-second deadline.
+                fails_through_egress(failing['banner'], 'proxy_unavailable')
+                fails_through_egress(failing['stub'], 'proxy_unavailable')
+                fails_through_egress(failing['lf'], 'proxy_denied')
+                assert egress.take() == [f'CONNECT {failing[name]} HTTP/1.1' for name in ('banner', 'stub', 'lf')]
                 # It cannot reach the site, and says so as Squid does, with a 5xx answer.
                 fails_through_egress(failing['unreachable'], 'upstream_failure')
                 assert egress.take() == [f'CONNECT {failing["unreachable"]} HTTP/1.1']
@@ -772,7 +796,9 @@ def main():
             nothing = s.getsockname()
         with (server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker,
               egress_proxy({'site.test': ip, 'wrong.test': ip, 'closed.test': b'', 'unreachable.test': nothing,
-                            'garbled.test': b'SSH-2.0-test egress proxy\r\n\r\n'}) as egress):
+                            'garbled.test': b'SSH-2.0-test egress proxy\r\n\r\n',
+                            'banner.test': KeptOpen(b'SSH-2.0-test egress proxy\r\n'), 'stub.test': KeptOpen(b'SSH-2.0'),
+                            'lf.test': KeptOpen(b'HTTP/1.1 403 Forbidden\n\n')}) as egress):
             for shared in (False,True):
                 do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails,
                         ignored=egress)
