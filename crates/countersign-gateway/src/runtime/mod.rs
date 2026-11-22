@@ -387,26 +387,32 @@ fn admission_status(error: &(dyn Error + Send + Sync + 'static)) -> StatusCode {
     StatusCode::SERVICE_UNAVAILABLE
 }
 fn http_response(status: StatusCode) -> ReplyBody {
-    let mut builder = Response::builder().status(status);
-    if !status.is_success() {
-        let code = match status {
-            StatusCode::PROXY_AUTHENTICATION_REQUIRED => "authentication_required",
-            StatusCode::FORBIDDEN => "denied",
-            StatusCode::TOO_MANY_REQUESTS => "busy",
-            StatusCode::GATEWAY_TIMEOUT => "timeout",
-            StatusCode::SERVICE_UNAVAILABLE => "unavailable",
-            StatusCode::BAD_GATEWAY => "upstream_failure",
-            _ => "invalid_request",
-        };
-        let request_id = id();
-        builder = builder
-            .header("Countersign-Error", code)
-            .header("Countersign-Request-ID", request_id.as_str());
-        if status == StatusCode::PROXY_AUTHENTICATION_REQUIRED {
-            builder = builder.header(header::PROXY_AUTHENTICATE, "Bearer");
-        }
-        eprintln!("Gateway CONNECT {} {code}", request_id.as_str());
+    if status.is_success() {
+        let builder = Response::builder().status(status);
+        return builder.body(Empty::new()).expect("fixed response");
     }
+    let code = match status {
+        StatusCode::PROXY_AUTHENTICATION_REQUIRED => "authentication_required",
+        StatusCode::FORBIDDEN => "denied",
+        StatusCode::TOO_MANY_REQUESTS => "busy",
+        StatusCode::GATEWAY_TIMEOUT => "timeout",
+        StatusCode::SERVICE_UNAVAILABLE => "unavailable",
+        StatusCode::BAD_GATEWAY => "upstream_failure",
+        _ => "invalid_request",
+    };
+    error_response(status, code)
+}
+/// A refused CONNECT: no body, the error value, and the request ID the log line shares.
+fn error_response(status: StatusCode, code: &str) -> ReplyBody {
+    let request_id = id();
+    let mut builder = Response::builder()
+        .status(status)
+        .header("Countersign-Error", code)
+        .header("Countersign-Request-ID", request_id.as_str());
+    if status == StatusCode::PROXY_AUTHENTICATION_REQUIRED {
+        builder = builder.header(header::PROXY_AUTHENTICATE, "Bearer");
+    }
+    eprintln!("Gateway CONNECT {} {code}", request_id.as_str());
     builder.body(Empty::new()).expect("fixed response")
 }
 async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> ReplyBody {
@@ -485,10 +491,11 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
     let Ok(trust) = PeerTrust::load(rule) else {
         return http_response(StatusCode::BAD_GATEWAY);
     };
+    let egress_proxy = gateway.config.egress_proxy_for(rule);
     let target = timeout_at(deadline, async {
         let denied = &gateway.config.denied_networks;
         // Never both: a proxied destination is never tried directly.
-        match gateway.config.egress_proxy_for(rule) {
+        match egress_proxy {
             Some(proxy) => egress::tunnel(proxy, &origin, denied).await,
             None => {
                 let pinned = config::resolve_target(&origin, rule, denied).await?;
@@ -496,9 +503,15 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
             }
         }
     })
-    .await;
-    let Ok(Ok(target)) = target else {
-        return http_response(StatusCode::BAD_GATEWAY);
+    .await
+    .map_err(Into::into)
+    .and_then(|target| target);
+    let target = match target {
+        Ok(target) => target,
+        Err(error) if egress_proxy.is_some() => {
+            return error_response(StatusCode::BAD_GATEWAY, egress::error_value(error.as_ref()));
+        }
+        Err(_) => return http_response(StatusCode::BAD_GATEWAY),
     };
     if ingress.guard.check().is_err() || egress.guard.check().is_err() {
         return http_response(StatusCode::SERVICE_UNAVAILABLE);

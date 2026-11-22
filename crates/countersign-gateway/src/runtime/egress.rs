@@ -28,6 +28,18 @@ impl fmt::Display for ProxyAnswer {
 
 impl Error for ProxyAnswer {}
 
+/// The `Countersign-Error` value for a proxied leg that failed (ADR 0003).
+pub fn error_value(error: &(dyn Error + Send + Sync + 'static)) -> &'static str {
+    match error.downcast_ref::<ProxyAnswer>() {
+        Some(ProxyAnswer(400..=499)) => "proxy_denied",
+        // As a direct route reports a site it cannot reach.
+        Some(ProxyAnswer(500..=599)) => "upstream_failure",
+        // Unreachable, resolved only inside `denied_networks`, out of time
+        // (the deadline covers the whole leg), or no usable HTTP answer.
+        _ => "proxy_unavailable",
+    }
+}
+
 /// Opens a tunnel to `origin` through the egress proxy. On success the stream
 /// carries the site's bytes from its first byte: the Gateway reads the
 /// proxy's answer no further than the end of its head.

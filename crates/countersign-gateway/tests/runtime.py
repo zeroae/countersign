@@ -82,8 +82,48 @@ def token(workload):
     return 'fixture.' + base64.urlsafe_b64encode(body).decode().rstrip('=') + '.fixture'
 
 
-class Fixture(http.server.ThreadingHTTPServer):
+class Counting:
+    """A server that records the peer of each connection it accepts, before it reads a byte of it."""
+
+    def counted(self, peer):
+        with self.accepted:
+            self.peers.append(peer)
+            self.accepted.notify_all()
+
+    @property
+    def connections(self):
+        return len(self.peers)
+
+    def accepted_since(self, seen):
+        """The connections the server accepted after its first `seen`, other than a probe of ours. It
+        accepts in order, so once it has accepted the probe it has accepted every connection before it."""
+        with socket.create_connection(self.server_address[:2], timeout=4) as probe:
+            mine = probe.getsockname()
+            with self.accepted:
+                if not self.accepted.wait_for(lambda: mine in self.peers[seen:], 4):
+                    # Only an earlier connection holds up the server's accept.
+                    assert self.peers[seen:], 'The probe was not accepted'
+                return [peer for peer in self.peers[seen:] if peer != mine]
+
+
+class Fixture(Counting, http.server.ThreadingHTTPServer):
     daemon_threads = True
+
+    def __init__(self, address, handler, tls):
+        super().__init__(address, handler)
+        self.tls = tls
+        self.peers = []
+        self.accepted = threading.Condition()
+
+    def get_request(self):
+        # Counted before the TLS handshake, so a connection the handshake ends counts too.
+        connection, address = self.socket.accept()
+        self.counted(address)
+        try:
+            return self.tls.wrap_socket(connection, server_side=True), address
+        except OSError:
+            connection.close()
+            raise
 
     def handle_error(self, request, client_address):
         # Cancelling an outstanding poll or forcibly cutting off either TLS leg
@@ -139,6 +179,9 @@ class Broker(http.server.BaseHTTPRequestHandler):
         body = frame['body']
         now = int(time.time() * 1000)
         msg = frame['type']
+        if msg == 'sign':
+            # Every signature it is asked for, granted or not.
+            authority.signatures.append(body['binding']['host'])
         # One grant for each destination the user can reach.
         grant = grants.get(body.get('host') or body.get('binding', {}).get('host'))
         if msg in ('connect', 'lookup') and grant and body['workload'] == grant['workload']:
@@ -181,8 +224,7 @@ class Broker(http.server.BaseHTTPRequestHandler):
 
 @contextlib.contextmanager
 def server(addr, handler, tls):
-    httpd = Fixture((addr, 0), handler)
-    httpd.socket = tls.wrap_socket(httpd.socket, server_side=True)
+    httpd = Fixture((addr, 0), handler, tls)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -191,6 +233,17 @@ def server(addr, handler, tls):
         httpd.shutdown()
         httpd.server_close()
         thread.join()
+
+
+# Like Squid's, each refusal carries a page of the proxy's own. A Workload never sees it.
+PAGE = b'<html>test egress proxy error page</html>\n'
+ERROR_PAGE = b'content-type: text/html\r\ncontent-length: %d\r\n\r\n%s' % (len(PAGE), PAGE)
+
+
+# Names whose proxied leg fails, one for each way: the test-only egress proxy refuses, closes
+# unanswered, answers with something that is not HTTP, cannot reach the site, or tunnels to a
+# site whose certificate is for another name.
+PROXY_FAILURES = ['refused', 'closed', 'garbled', 'unreachable', 'wrong']
 
 
 class Tunnel(socketserver.BaseRequestHandler):
@@ -210,9 +263,19 @@ class Tunnel(socketserver.BaseRequestHandler):
         host, _, port = target.rpartition(':')
         address = self.server.names.get(host)
         if method != 'CONNECT' or address is None:
-            self.request.sendall(b'HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n')
+            self.request.sendall(b'HTTP/1.1 403 Forbidden\r\n' + ERROR_PAGE)
             return
-        with socket.create_connection((address, int(port)), timeout=5) as site:
+        if isinstance(address, bytes):
+            # This answer and no other, then the end of the connection.
+            self.request.sendall(address)
+            return
+        try:
+            site = socket.create_connection(address if isinstance(address, tuple) else (address, int(port)),
+                                            timeout=5)
+        except OSError:
+            self.request.sendall(b'HTTP/1.1 503 Service Unavailable\r\n' + ERROR_PAGE)
+            return
+        with site:
             site.settimeout(None)
             self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
             def pump(source, sink):
@@ -228,8 +291,10 @@ class Tunnel(socketserver.BaseRequestHandler):
             back.join()
 
 
-class EgressProxy(socketserver.ThreadingTCPServer):
-    """A test-only egress proxy. It records each request line, and is the only resolver of `names`."""
+class EgressProxy(Counting, socketserver.ThreadingTCPServer):
+    """A test-only egress proxy. It records each request line, and is the only resolver of `names`.
+    A name it maps to bytes gets those bytes as its whole answer, and one it maps to an address and
+    port is tunneled there, whatever port the CONNECT names."""
     daemon_threads = True
 
     def __init__(self, names):
@@ -237,6 +302,13 @@ class EgressProxy(socketserver.ThreadingTCPServer):
         self.names = names
         self.requests = []
         self.recorded = threading.Lock()
+        self.peers = []
+        self.accepted = threading.Condition()
+
+    def get_request(self):
+        request, peer = super().get_request()
+        self.counted(peer)
+        return request, peer
 
     def take(self):
         with self.recorded:
@@ -336,16 +408,21 @@ def egress_configuration(dir, binary, config):
 
 
 def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False, sandbox=None,
-            startup_fails=None, egress=None, ignored=None):
+            startup_fails=None, egress=None, ignored=None, unusable=None):
     """With `egress`, a test-only egress proxy, the Gateway reaches the site only through it. With
-    `ignored` instead, the Gateway's environment names that proxy, and the Gateway connects directly."""
+    `ignored` instead, the Gateway's environment names that proxy, and the Gateway connects directly.
+    With `unusable` as well as `egress`, configuration that leaves the Gateway no usable egress proxy,
+    the Gateway can resolve and reach the site itself, and must not."""
     host = f'site.test:{site.server_port}'
     # The site again, under a name with a direct route beside the egress proxy.
     direct = f'direct.test:{site.server_port}'
+    # Destinations the Gateway and the grant authority allow, whose proxied leg fails.
+    failing = {name: f'{name}.test:{site.server_port}' for name in PROXY_FAILURES}
     broker.accounts = {}
     broker.retired = {user: threading.Event() for user in identities}
     broker.public = {}
     broker.observations = {}
+    broker.signatures = []
     broker.observation_change = threading.Condition()
     broker.shared = shared
     broker.service_secret = 'secret-' * 8
@@ -364,7 +441,9 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         bindings[user] = workload
         broker.public[user] = b64(der)
         broker.accounts[token(workload)] = (user,key,{host: grant(user, 'site', host),
-                                                      direct: grant(user+'-direct', 'direct', direct)})
+                                                      direct: grant(user+'-direct', 'direct', direct),
+                                                      **{to: grant(f'{user}-{name}', name, to)
+                                                         for name, to in failing.items()}})
     with socket.socket() as tmp:
         tmp.bind(('127.0.0.1',0))
         port = tmp.getsockname()[1]
@@ -379,8 +458,11 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         # other keeps its own, on a direct route.
         config['egress_proxy'] = f'http://localhost:{egress.server_address[1]}'
         del config['destinations'][0]['private_networks']
-        config['destinations'].append({**config['destinations'][0], 'id':'direct', 'pattern':direct,
+        proxied = config['destinations'][0]
+        config['destinations'].append({**proxied, 'id':'direct', 'pattern':direct,
                                        'private_networks':[ip+'/32'], 'egress':'direct'})
+        config['destinations'] += [{**proxied, 'id':name, 'pattern':to} for name, to in failing.items()]
+        config.update(unusable or {})
     if shared:
         crl = dir / 'site.crl'
         publish_crl(crl, ca, 1, datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))
@@ -406,7 +488,8 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         egress_configuration(dir, binary, config)
     hosts = dir/'hosts'
     # Behind the egress proxy only the proxy can resolve the site's name.
-    hosts.write_text('127.0.0.1 localhost\n' + (ip+' direct.test\n' if egress else ip+' site.test\n'))
+    hosts.write_text('127.0.0.1 localhost\n' + (ip+' direct.test\n' if egress else '')
+                     + ('' if egress and not unusable else ip+' site.test\n'))
     # Override /etc/hosts only for the Gateway parent. Grant workers are then
     # isolated by the production launcher and receive only preconnected streams.
     library = os.environ.get('NSS_WRAPPER_LIBRARY') or str(next(Path('/usr/lib').glob('*/libnss_wrapper.so')))
@@ -417,8 +500,11 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                             ('HTTPS_PROXY','https_proxy','HTTP_PROXY','http_proxy','ALL_PROXY','all_proxy')})
         ignored.take()
     if egress:
-        unresolved = subprocess.run(['getent','ahosts','site.test'], env=environment, capture_output=True, timeout=10)
-        assert unresolved.returncode == 2, ('The Gateway could resolve the site itself', unresolved)
+        resolved = subprocess.run(['getent','ahosts','site.test'], env=environment, capture_output=True, timeout=10)
+        if unusable:
+            assert resolved.returncode == 0 and ip in resolved.stdout.decode(), ('The Gateway could not reach the site', resolved)
+        else:
+            assert resolved.returncode == 2, ('The Gateway could resolve the site itself', resolved)
         egress.take()
     with subprocess.Popen([binary,'serve',str(dir/'config.json')], stderr=subprocess.PIPE, text=True,
                           env=environment) as child:
@@ -461,15 +547,54 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                                 r'Landlock (ABI v[1-9]\d*|unavailable), seccomp allow-list'), log
             if egress:
                 # Startup names the egress proxy, and the rules whose address policy it now carries.
-                assert wait_for_log(rf'Gateway egress proxy localhost:{egress.server_address[1]} carries the '
-                                    r'address policy of destinations: site'), log
+                assert wait_for_log(rf'Gateway egress proxy localhost:{config["egress_proxy"].rpartition(":")[2]} carries the '
+                                    r'address policy of destinations: ' + ', '.join(['site', *failing])), log
             def request(user,extra=(),path='/', timeout=8, to=host):
                 args=['curl','--silent','--show-error','--fail','--max-time',str(timeout),'--noproxy','','--proxy',proxy,
                       '--proxy-cacert',str(dir/'ca.pem'),'--cacert',str(pub)]
                 if shared:
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
                 return subprocess.run(args + list(extra) + ['https://'+to+path], capture_output=True, timeout=timeout+2)
+            def connect(user, to):
+                """The Gateway's whole answer to one Workload CONNECT, as bytes."""
+                listener = socket.create_connection(('127.0.0.1', port), timeout=8)
+                if shared:
+                    # As curl does, without Python's stricter X.509 profile.
+                    trust = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    trust.load_verify_locations(dir/'ca.pem')
+                    listener = trust.wrap_socket(listener, server_hostname='localhost')
+                lines = [f'CONNECT {to} HTTP/1.1', f'Host: {to}', 'Connection: close']
+                if shared:
+                    lines.append('Proxy-Authorization: Bearer ' + token(bindings[user]))
+                with listener:
+                    listener.sendall(('\r\n'.join(lines) + '\r\n\r\n').encode())
+                    answer = b''
+                    while data := listener.recv(65536):
+                        answer += data
+                return answer
+            def fails_through_egress(to, error):
+                """The proxied leg to `to` fails: the Workload reads why, and the site sees nothing."""
+                seen = site.connections
+                answer = connect(users[0], to)
+                # Never a direct connection instead.
+                assert not site.accepted_since(seen), (to, 'The site saw a connection', answer)
+                head, _, body = answer.partition(b'\r\n\r\n')
+                status, *fields = head.decode('latin-1').split('\r\n')
+                headers = {key.lower(): value for key, _, value in (f.partition(': ') for f in fields)}
+                assert status.startswith('HTTP/1.1 502 '), (to, answer)
+                assert headers.get('countersign-error') == error, (to, answer)
+                request_id = headers.get('countersign-request-id')
+                assert request_id, (to, answer)
+                # Nothing of the egress proxy's own answer reaches the Workload.
+                assert body == b'' and b'egress proxy' not in answer, (to, answer)
+                assert wait_for_log(rf'Gateway CONNECT {re.escape(request_id)} {error}'), (to, log)
             users = list(identities) if shared else ['alice']
+            if unusable:
+                seen = egress.connections
+                fails_through_egress(host, 'proxy_unavailable')
+                assert not egress.accepted_since(seen), 'The egress proxy saw a connection'
+                assert egress.take() == []
+                return
             def launched_directly():
                 # The filter sandbox starts each grant worker itself: every process
                 # under the Gateway runs the Gateway's executable, started by the Gateway.
@@ -524,6 +649,23 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                     assert res.returncode == 0, (user, res.stderr)
                     assert res.stdout == identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
                 assert egress.take() == [], 'A direct destination went through the egress proxy'
+                # The egress proxy refuses a name it does not allow.
+                fails_through_egress(failing['refused'], 'proxy_denied')
+                assert egress.take() == [f'CONNECT {failing["refused"]} HTTP/1.1'], 'The refusal was not the proxy\'s'
+                # It closes the connection unanswered, or answers with something that is not HTTP.
+                fails_through_egress(failing['closed'], 'proxy_unavailable')
+                fails_through_egress(failing['garbled'], 'proxy_unavailable')
+                assert egress.take() == [f'CONNECT {failing[name]} HTTP/1.1' for name in ('closed', 'garbled')]
+                # It cannot reach the site, and says so as Squid does, with a 5xx answer.
+                fails_through_egress(failing['unreachable'], 'upstream_failure')
+                assert egress.take() == [f'CONNECT {failing["unreachable"]} HTTP/1.1']
+                # Through a tunnel it allows, to a site whose certificate is for another name, the
+                # request fails before the user's certificate signs anything.
+                res = request(users[0], to=failing['wrong'])
+                assert res.returncode != 0 and not res.stdout, (res.returncode, res.stdout)
+                assert egress.take() == [f'CONNECT {failing["wrong"]} HTTP/1.1'], 'The egress proxy refused the tunnel'
+                assert host in broker.signatures, 'The grant authority recorded no signature at all'
+                assert failing['wrong'] not in broker.signatures, 'A site with the wrong certificate got a signature'
             if ignored:
                 assert ignored.take() == [], 'The Gateway took the egress proxy from its environment'
                 with logged:
@@ -624,8 +766,13 @@ def main():
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
             s.connect(('192.0.2.1',9))
             ip=s.getsockname()[0]
+        with socket.socket() as s:
+            s.bind(('127.0.0.1',0))
+            # Nothing listens here once the socket closes.
+            nothing = s.getsockname()
         with (server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker,
-              egress_proxy({'site.test': ip}) as egress):
+              egress_proxy({'site.test': ip, 'wrong.test': ip, 'closed.test': b'', 'unreachable.test': nothing,
+                            'garbled.test': b'SSH-2.0-test egress proxy\r\n\r\n'}) as egress):
             for shared in (False,True):
                 do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails,
                         ignored=egress)
@@ -636,6 +783,13 @@ def main():
             for shared in (False,True):
                 do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,egress=egress)
                 print(('shared' if shared else 'sidecar')+' Gateway mTLS through the egress proxy passed')
+                # Nothing listens at the egress proxy's address.
+                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,egress=egress,
+                        unusable={'egress_proxy': f'http://localhost:{nothing[1]}'})
+                # The egress proxy's only address is inside `denied_networks`.
+                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,egress=egress,
+                        unusable={'denied_networks': ['127.0.0.0/8', '::1/128']})
+                print(('shared' if shared else 'sidecar')+' Gateway without a usable egress proxy failed closed')
             do_test(dir,binary,ip,site,broker,identities,ca,True,filter_kill=True,sandbox=sandbox)
             print('filter-killed grant worker fenced')
 
