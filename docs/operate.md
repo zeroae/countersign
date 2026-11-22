@@ -87,7 +87,46 @@ The authenticated Integrator backend derives the user, Context and Workload inst
 
 Configure matching rule IDs, versions, patterns and approval scopes at the Broker and Gateway. An exact rule wins over a wildcard. For example, `*.corp.example:443` matches `api.corp.example:443` only one label below the suffix. The apex, deeper names and other ports require their own entries. By default the prompt covers only the exact host. To offer approval across the wildcard, set `whole_wildcard: true` at the Broker and `approval: "whole_wildcard"` at the Gateway. Each intercepted host still receives its own leaf.
 
-For an internal site, specify its exact DNS name and port and put its allowed addresses in `private_networks`. The parent validates the entire DNS answer set, including IPv4-mapped IPv6, before pinning one socket address. A mixed allowed/forbidden answer fails the connection. Add site-specific infrastructure and control-plane ranges to `denied_networks`. The Gateway also rejects special-use addresses including loopback, link-local, shared carrier space and known metadata endpoints. Within TLS it checks SNI and the authority of each HTTP request. [Destination fields](reference/config.md#destination-entries)
+For an internal site on a direct route, specify its exact DNS name and port and put its allowed addresses in `private_networks`. The parent validates the entire DNS answer set, including IPv4-mapped IPv6, before pinning one socket address. A mixed allowed/forbidden answer fails the connection. Add site-specific infrastructure and control-plane ranges to `denied_networks`. The Gateway also rejects special-use addresses including loopback, link-local, shared carrier space and known metadata endpoints. Within TLS it checks SNI and the authority of each HTTP request. [Destination fields](reference/config.md#destination-entries)
+
+## Reach sites through an egress proxy
+
+Some networks give the Gateway no direct route to a protected site. The only way out is an HTTP proxy that authorizes each `CONNECT` by hostname and port and passes the TLS bytes through unread. Name that proxy, the egress proxy, once in the Gateway configuration. Every destination then goes through it. A rule that should connect directly says `"egress": "direct"`. Sidecar and shared mode take the same fields.
+
+```json
+{
+  "egress_proxy": "http://proxy.internal:3128",
+  "destinations": [
+    {"id": "partner-api", "version": 1, "pattern": "api.partner.example:443", "roots": "/config/partner-roots.pem"},
+    {"id": "ledger", "version": 1, "pattern": "ledger.corp.example:443", "roots": "/config/corp-roots.pem",
+     "egress": "direct", "private_networks": ["10.20.0.0/24"]}
+  ]
+}
+```
+
+Each route puts name resolution and the site's address policy in a different place.
+
+| | Direct route | Through the egress proxy |
+| --- | --- | --- |
+| Rules | Every rule when `egress_proxy` is absent, and a rule with `"egress": "direct"` | Every other rule when `egress_proxy` is set |
+| Who resolves the site's name | The Gateway, through system DNS | The egress proxy. The Gateway resolves only the proxy's own name, on every connection, so a load balancer may change addresses |
+| Who checks the site's addresses | The Gateway: every DNS answer against `private_networks`, `denied_networks` and its special-use blocks, before it pins one address | The egress proxy's ACLs. The Gateway checks none of the site's addresses |
+| `private_networks` | Allowed, for an exact private site | Refused at startup, naming the rule. Remove the field, or set `"egress": "direct"` |
+
+Everything else stays with Countersign on both routes. A site still needs its destination rule at the Gateway and the Broker, the user still approves, and the grant and its leases cut off a connection in the same way. The Gateway verifies the site's certificate against the hostname and the rule's roots before the user's certificate signs anything, so a tunnel to the wrong machine receives no signature. The egress proxy carries only encrypted bytes.
+
+On a proxied route the egress proxy's ACLs are the site's address policy, and the Gateway no longer blocks anything for those sites. Configure the egress proxy to:
+
+- allow `CONNECT` only to the hostnames and ports of your destination rules;
+- refuse cloud metadata addresses, such as `169.254.169.254`, `fd00:ec2::254` and `168.63.129.16`, and every link-local and loopback address;
+- allow a private site only on its own prefixes, where you want the check `private_networks` gave on a direct route;
+- pass TLS through without interception. An egress proxy that terminates TLS cannot present the site's certificate, so the request fails.
+
+A wildcard rule behind the egress proxy reaches every host under it that the proxy allows, private ones included: on a direct route the Gateway refuses a wildcard rule for a private site, but through the proxy it cannot tell that a site is private. The Gateway also cannot stop the egress proxy from opening a tunnel to any address its ACLs allow.
+
+The egress proxy itself normally sits on a private address, such as an internal load balancer. `private_networks` and the special-use blocks do not apply to it. `denied_networks` does: an answer for the proxy's name inside it is never used.
+
+At startup the Gateway logs the egress proxy and the rules that leave their address policy to it, such as `Gateway egress proxy proxy.internal:3128 carries the address policy of destinations: partner-api`. The Gateway reads the egress proxy only from its configuration, never from `HTTPS_PROXY` or another proxy environment variable, and it always reaches the Broker directly. When the proxied leg fails, the Workload's `CONNECT` returns 502 and the Gateway does not try the site directly. A user can approve and the request then fail at the egress proxy, as it can at an unreachable site on a direct route. [Gateway fields](reference/config.md#gateway) · [ADR 0003](https://github.com/zeroae/countersign/blob/main/docs/adr/0003-the-egress-proxy-resolves-the-site-and-carries-its-address-policy.md)
 
 ## Maintain trust and stop access
 
