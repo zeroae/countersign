@@ -1,5 +1,6 @@
 mod broker;
 mod config;
+mod egress;
 mod forward;
 mod relay;
 mod worker;
@@ -485,8 +486,15 @@ async fn connect_request(gateway: Arc<Gateway>, req: Request<Incoming>) -> Reply
         return http_response(StatusCode::BAD_GATEWAY);
     };
     let target = timeout_at(deadline, async {
-        let pinned = config::resolve_target(&origin, rule, &gateway.config.denied_networks).await?;
-        Ok::<_, Box<dyn Error + Send + Sync>>(TcpStream::connect(pinned).await?)
+        let denied = &gateway.config.denied_networks;
+        // Never both: a proxied destination is never tried directly.
+        match gateway.config.egress_proxy_for(rule) {
+            Some(proxy) => egress::tunnel(proxy, &origin, denied).await,
+            None => {
+                let pinned = config::resolve_target(&origin, rule, denied).await?;
+                Ok(TcpStream::connect(pinned).await?)
+            }
+        }
     })
     .await;
     let Ok(Ok(target)) = target else {
@@ -868,7 +876,14 @@ pub async fn run(args: &[String]) -> Result<()> {
     let [verb, path] = args else {
         return Err(invalid("usage: countersign-gateway serve|env CONFIG.json"));
     };
-    let config = Config::load(Path::new(path))?;
+    let config = match Config::load(Path::new(path)) {
+        Ok(config) => config,
+        Err(error) => {
+            // In its own words, so a cause that quotes a field reads as written.
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
     if verb == "env" {
         println!("{}", config.env()?);
         return Ok(());
@@ -888,6 +903,12 @@ pub async fn run(args: &[String]) -> Result<()> {
     match sandbox.outer_layer() {
         Some(outer) => eprintln!("Gateway worker sandbox \"{sandbox}\": {outer}, {layers}"),
         None => eprintln!("Gateway worker sandbox \"{sandbox}\": {layers}"),
+    }
+    if let Some(proxy) = &config.egress_proxy {
+        eprintln!(
+            "Gateway egress proxy {proxy} {}",
+            config.left_to_egress_proxy()
+        );
     }
     let policy = config.policy()?;
     let broker = Broker::new(&config)?;

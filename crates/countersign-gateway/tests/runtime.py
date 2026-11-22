@@ -1,4 +1,5 @@
-"""Exercise real Linux Gateway processes against a test-only grant authority and mTLS site.
+"""Exercise real Linux Gateway processes against a test-only grant authority and mTLS site,
+directly and through a test-only egress proxy.
 
 Usage: python3 crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
            [--worker-sandbox namespaces|filter] [--startup-fails LAYER]
@@ -19,6 +20,7 @@ import re
 from pathlib import Path
 import signal
 import socket
+import socketserver
 import ssl
 import subprocess
 import sys
@@ -129,7 +131,7 @@ class Broker(http.server.BaseHTTPRequestHandler):
         if token not in authority.accounts or not self.headers.get('X-Countersign-Gateway-Instance'):
             self.send_error(403)
             return
-        user, key, grant = authority.accounts[token]
+        user, key, grants = authority.accounts[token]
         if authority.shared and self.headers.get('X-Countersign-Gateway') != authority.service_secret:
             self.send_error(403)
             return
@@ -137,26 +139,28 @@ class Broker(http.server.BaseHTTPRequestHandler):
         body = frame['body']
         now = int(time.time() * 1000)
         msg = frame['type']
-        if msg in ('connect', 'lookup') and body['workload'] == grant['workload'] and body['host'] == authority.host:
+        # One grant for each destination the user can reach.
+        grant = grants.get(body.get('host') or body.get('binding', {}).get('host'))
+        if msg in ('connect', 'lookup') and grant and body['workload'] == grant['workload']:
             kind = 'activate'
             value = {'activation': {'grant': grant, 'offer': user, 'approval': user,
                                      'expires_at_ms': authority.expires_at},
                      'chain': [authority.public[user]]}
-        elif msg == 'watch' and body == grant:
+        elif msg == 'watch' and body in grants.values():
             retired = authority.retired[user].wait(5)
-            kind, value = ('retire' if retired else 'no_change'), grant
-        elif msg == 'observed' and body['grant'] == grant and body['host'] == authority.host:
+            kind, value = ('retire' if retired else 'no_change'), body
+        elif msg == 'observed' and grant and body['grant'] == grant:
             kind = 'observed'
             value = body
             with authority.observation_change:
                 received = authority.observations.setdefault((user,body['tls_connection']),set())
                 received.add(body['observation'])
                 authority.observation_change.notify_all()
-        elif msg == 'renew_lease' and body['grant'] == grant:
+        elif msg == 'renew_lease' and body['grant'] in grants.values():
             kind = 'lease'
             budget = 2000 if user == 'alice' else 30000
             value = {'binding': body, 'disposition': {'granted': {'budget_ms': budget, 'valid_until_ms': now + budget}}}
-        elif msg == 'sign' and body['binding']['grant'] == grant and body['binding']['host'] == authority.host:
+        elif msg == 'sign' and grant and body['binding']['grant'] == grant:
             assert body['tls'] == 'tls13' and body['scheme'] == 'ecdsa_nistp256_sha256'
             transcript = base64.b64decode(body['certificate_verify'], validate=True)
             assert transcript.startswith(b' ' * 64 + b'TLS 1.3, client CertificateVerify\x00')
@@ -186,6 +190,70 @@ def server(addr, handler, tls):
     finally:
         httpd.shutdown()
         httpd.server_close()
+        thread.join()
+
+
+class Tunnel(socketserver.BaseRequestHandler):
+    """One CONNECT through the test-only egress proxy. Like Squid, it ends both legs when either ends."""
+
+    def handle(self):
+        head = b''
+        while b'\r\n\r\n' not in head:
+            data = self.request.recv(4096)
+            if not data or len(head) > 8192:
+                return
+            head += data
+        line = head.split(b'\r\n', 1)[0].decode('latin-1')
+        with self.server.recorded:
+            self.server.requests.append(line)
+        method, target, _ = (line.split(' ', 2) + ['', ''])[:3]
+        host, _, port = target.rpartition(':')
+        address = self.server.names.get(host)
+        if method != 'CONNECT' or address is None:
+            self.request.sendall(b'HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n')
+            return
+        with socket.create_connection((address, int(port)), timeout=5) as site:
+            site.settimeout(None)
+            self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
+            def pump(source, sink):
+                with contextlib.suppress(OSError):
+                    while data := source.recv(65536):
+                        sink.sendall(data)
+                for leg in (source, sink):
+                    with contextlib.suppress(OSError):
+                        leg.shutdown(socket.SHUT_RDWR)
+            back = threading.Thread(target=pump, args=(site, self.request), daemon=True)
+            back.start()
+            pump(self.request, site)
+            back.join()
+
+
+class EgressProxy(socketserver.ThreadingTCPServer):
+    """A test-only egress proxy. It records each request line, and is the only resolver of `names`."""
+    daemon_threads = True
+
+    def __init__(self, names):
+        super().__init__(('127.0.0.1', 0), Tunnel)
+        self.names = names
+        self.requests = []
+        self.recorded = threading.Lock()
+
+    def take(self):
+        with self.recorded:
+            requests, self.requests = self.requests, []
+        return requests
+
+
+@contextlib.contextmanager
+def egress_proxy(names):
+    proxy = EgressProxy(names)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield proxy
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
         thread.join()
 
 
@@ -219,10 +287,61 @@ def configuration_loading(dir, binary, config):
         assert not loads(worker_sandbox=value), value
 
 
+def egress_configuration(dir, binary, config):
+    """`egress_proxy` is optional: an http URL with a host and a port. `env` and `serve` refuse
+    the same configurations, and say why."""
+    path = dir / 'egress.json'
+    base = {key: value for key, value in config['destinations'][0].items() if key != 'egress'}
+    rule = {key: value for key, value in base.items() if key != 'private_networks'}
+    def write(proxy, **fields):
+        changed = {**config, 'destinations': [{**rule, **fields}]}
+        if proxy is not None:
+            changed['egress_proxy'] = proxy
+        path.write_text(json.dumps(changed))
+    def loads(proxy=None, **fields):
+        write(proxy, **fields)
+        return subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
+    def refused(proxy=None, **fields):
+        # Both commands, and the same words from each: one line that names the cause.
+        write(proxy, **fields)
+        results = [subprocess.run([binary, verb, str(path)], capture_output=True, text=True, timeout=10)
+                   for verb in ('env', 'serve')]
+        for result in results:
+            assert result.returncode != 0 and not result.stdout, (proxy, fields, result)
+        assert results[0].stderr == results[1].stderr, results
+        lines = results[0].stderr.splitlines()
+        assert len(lines) == 1, lines
+        return lines[0]
+    for proxy in ('http://proxy.test:3128', 'http://127.0.0.1:3128', 'http://[::1]:3128', 'http://proxy.test:3128/'):
+        assert loads(proxy), proxy
+    error = refused('https://proxy.test:3128')
+    assert 'egress_proxy' in error and 'https' in error, error
+    for proxy in ('http://user:secret@proxy.test:3128', 'http://user@proxy.test:3128'):
+        error = refused(proxy)
+        assert 'egress_proxy' in error and 'credentials' in error and 'secret' not in error, error
+    for proxy in ('http://proxy.test', 'http://proxy.test:', 'http://[::1]', 'http://proxy.test:3128/path', 'http://proxy.test:3128?q', 'ftp://proxy.test:3128',
+                  'proxy.test:3128', ''):
+        assert 'egress_proxy' in refused(proxy), proxy
+    refused(3128)
+    # A rule's `egress` takes one value, with or without an egress proxy.
+    direct = {**base, 'egress': 'direct'}
+    assert loads(**direct) and loads('http://proxy.test:3128', **direct)
+    # Nobody checks `private_networks` on a proxied route, so a rule may not claim it.
+    error = refused('http://proxy.test:3128', **base)
+    assert re.search(r'\bsite\b', error) and 'private_networks' in error, error
+    assert 'remove' in error and '"egress": "direct"' in error, error
+    for value in ('proxy', 'default', 'Direct', 'none', '', None, True, ['direct']):
+        refused('http://proxy.test:3128', egress=value)
+        refused(egress=value)
+
+
 def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False, sandbox=None,
-            startup_fails=None):
+            startup_fails=None, egress=None, ignored=None):
+    """With `egress`, a test-only egress proxy, the Gateway reaches the site only through it. With
+    `ignored` instead, the Gateway's environment names that proxy, and the Gateway connects directly."""
     host = f'site.test:{site.server_port}'
-    broker.host = host
+    # The site again, under a name with a direct route beside the egress proxy.
+    direct = f'direct.test:{site.server_port}'
     broker.accounts = {}
     broker.retired = {user: threading.Event() for user in identities}
     broker.public = {}
@@ -237,12 +356,15 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         principal = 'alice' if user == 'alice-other-context' else user
         workload = {'integrator':'local','user':principal,'context':user,'workload':user,'workload_generation':1}
         der = cert.public_bytes(serialization.Encoding.DER)
-        grant = {'workload':workload,'grant':user,'grant_version':1,'worker':user,'worker_generation':1,
-                 'scope':{'entry_id':'site','entry_version':1,'pattern':host},
-                 'device':{'pairing':user,'key':user,'channel_generation':1}, 'cert_sha256':b64(hashlib.sha256(der).digest())}
+        def grant(name, entry, pattern):
+            return {'workload':workload,'grant':name,'grant_version':1,'worker':name,'worker_generation':1,
+                    'scope':{'entry_id':entry,'entry_version':1,'pattern':pattern},
+                    'device':{'pairing':user,'key':user,'channel_generation':1},
+                    'cert_sha256':b64(hashlib.sha256(der).digest())}
         bindings[user] = workload
         broker.public[user] = b64(der)
-        broker.accounts[token(workload)] = (user,key,grant)
+        broker.accounts[token(workload)] = (user,key,{host: grant(user, 'site', host),
+                                                      direct: grant(user+'-direct', 'direct', direct)})
     with socket.socket() as tmp:
         tmp.bind(('127.0.0.1',0))
         port = tmp.getsockname()[1]
@@ -252,10 +374,18 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
               'broker_url':f'https://localhost:{broker.server_port}', 'broker_ca':str(dir/'ca.pem'),
               'clock_uncertainty_ms':100,
               'destinations':[{'id':'site','version':1,'pattern':host,'roots':str(dir/'ca.pem'),'private_networks':[ip+'/32']}]}
+    if egress:
+        # The site's rule leaves its address policy to the egress proxy. The
+        # other keeps its own, on a direct route.
+        config['egress_proxy'] = f'http://localhost:{egress.server_address[1]}'
+        del config['destinations'][0]['private_networks']
+        config['destinations'].append({**config['destinations'][0], 'id':'direct', 'pattern':direct,
+                                       'private_networks':[ip+'/32'], 'egress':'direct'})
     if shared:
         crl = dir / 'site.crl'
         publish_crl(crl, ca, 1, datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))
-        config['destinations'][0]['revocation'] = {'kind':'crl', 'files':[str(crl)]}
+        for rule in config['destinations']:
+            rule['revocation'] = {'kind':'crl', 'files':[str(crl)]}
         config['shared']={'listener_cert':str(dir/'listener.pem'),'listener_key':str(dir/'listener.key'),
                           'gateway_token':str(dir/'service'),
                           'ca':{'type':'local','cert':str(dir/'ca.pem'),'key':str(dir/'ca.key')}}
@@ -264,17 +394,34 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         config.update(workload=bindings['alice'],workload_token=str(dir/'sidecar.token'))
     if sandbox:
         config['worker_sandbox'] = sandbox
+    if shared and not egress and not filter_kill:
+        # Without an egress proxy, `"egress": "direct"` changes nothing: the
+        # sidecar pass runs without it, this one with it.
+        config['destinations'][0]['egress'] = 'direct'
     (dir/'config.json').write_text(json.dumps(config))
     if startup_fails:
         return startup_failure(binary, dir/'config.json', sandbox or 'namespaces', startup_fails)
-    configuration_loading(dir, binary, config)
+    if not egress:
+        configuration_loading(dir, binary, config)
+        egress_configuration(dir, binary, config)
     hosts = dir/'hosts'
-    hosts.write_text('127.0.0.1 localhost\n'+ip+' site.test\n')
+    # Behind the egress proxy only the proxy can resolve the site's name.
+    hosts.write_text('127.0.0.1 localhost\n' + (ip+' direct.test\n' if egress else ip+' site.test\n'))
     # Override /etc/hosts only for the Gateway parent. Grant workers are then
     # isolated by the production launcher and receive only preconnected streams.
     library = os.environ.get('NSS_WRAPPER_LIBRARY') or str(next(Path('/usr/lib').glob('*/libnss_wrapper.so')))
+    environment = {**os.environ,'LD_PRELOAD':library,'NSS_WRAPPER_HOSTS':str(hosts)}
+    if ignored:
+        # Only `egress_proxy` chooses the route, never the environment.
+        environment.update({name: f'http://localhost:{ignored.server_address[1]}' for name in
+                            ('HTTPS_PROXY','https_proxy','HTTP_PROXY','http_proxy','ALL_PROXY','all_proxy')})
+        ignored.take()
+    if egress:
+        unresolved = subprocess.run(['getent','ahosts','site.test'], env=environment, capture_output=True, timeout=10)
+        assert unresolved.returncode == 2, ('The Gateway could resolve the site itself', unresolved)
+        egress.take()
     with subprocess.Popen([binary,'serve',str(dir/'config.json')], stderr=subprocess.PIPE, text=True,
-                          env={**os.environ,'LD_PRELOAD':library,'NSS_WRAPPER_HOSTS':str(hosts)}) as child:
+                          env=environment) as child:
         log = []
         logged = threading.Condition()
         def follow():
@@ -312,12 +459,16 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
             assert wait_for_log(('Gateway worker sandbox "filter": ' if sandbox == 'filter' else
                                  'Gateway worker sandbox "namespaces": namespaces, ') + 'non-dumpable, '
                                 r'Landlock (ABI v[1-9]\d*|unavailable), seccomp allow-list'), log
-            def request(user,extra=(),path='/', timeout=8):
+            if egress:
+                # Startup names the egress proxy, and the rules whose address policy it now carries.
+                assert wait_for_log(rf'Gateway egress proxy localhost:{egress.server_address[1]} carries the '
+                                    r'address policy of destinations: site'), log
+            def request(user,extra=(),path='/', timeout=8, to=host):
                 args=['curl','--silent','--show-error','--fail','--max-time',str(timeout),'--noproxy','','--proxy',proxy,
                       '--proxy-cacert',str(dir/'ca.pem'),'--cacert',str(pub)]
                 if shared:
                     args+=['--proxy-header','Proxy-Authorization: Bearer '+token(bindings[user])]
-                return subprocess.run(args + list(extra) + ['https://'+host+path], capture_output=True, timeout=timeout+2)
+                return subprocess.run(args + list(extra) + ['https://'+to+path], capture_output=True, timeout=timeout+2)
             users = list(identities) if shared else ['alice']
             def launched_directly():
                 # The filter sandbox starts each grant worker itself: every process
@@ -344,7 +495,7 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 assert request('alice').returncode != 0, 'A grant whose worker the filter killed was served again'
                 assert request('bob').returncode == 0, "Alice's killed grant worker affected Bob"
                 # A fresh approval is a new grant, which gets a new grant worker.
-                broker.accounts[token(bindings['alice'])][2].update(grant='alice-approved-again')
+                broker.accounts[token(bindings['alice'])][2][host].update(grant='alice-approved-again')
                 assert request('alice').returncode == 0, 'A fresh approval did not restore service'
                 # No grant worker outlives its supervisor, however the supervisor ends.
                 workers = descendants(child.pid)
@@ -363,6 +514,20 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 assert res.returncode==0,(user,res.stderr)
                 expected=identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
                 assert res.stdout==expected,(user,res.stdout)
+            through_egress = [f'CONNECT {host} HTTP/1.1'] * len(users)
+            if egress:
+                # Each Workload CONNECT opened its own tunnel, named by the site's hostname and port.
+                assert egress.take() == through_egress, through_egress
+                # The same Gateway reaches the rule with `"egress": "direct"` on its own.
+                for user in users:
+                    res = request(user, to=direct)
+                    assert res.returncode == 0, (user, res.stderr)
+                    assert res.stdout == identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
+                assert egress.take() == [], 'A direct destination went through the egress proxy'
+            if ignored:
+                assert ignored.take() == [], 'The Gateway took the egress proxy from its environment'
+                with logged:
+                    assert not any(line.startswith('Gateway egress proxy') for line in log), log
             if sandbox == 'filter':
                 launched_directly()
             expected_events = {'mtls_accepted','ingress_closed','egress_closed'}
@@ -393,6 +558,10 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
             assert site.cutoff.wait(1), 'upstream leg survived cutoff'
             assert time.monotonic() - begin < 4, 'cutoff exceeded lease and test scheduling budget'
             assert request('alice').returncode != 0, 'Lapsed worker reused old grant'
+            if egress:
+                # The slow request went through a tunnel too, as did each since.
+                taken = egress.take()
+                assert taken and set(taken) == set(through_egress), taken
             if shared:
                 assert request('bob').returncode == 0, 'Alice cutoff affected Bob'
                 assert request('alice-other-context').returncode == 0, 'Cutoff crossed Contexts using the same identity'
@@ -406,6 +575,9 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                     broker.retired['bob'].set()
                     assert future.result(timeout=4).returncode != 0
                     assert site.cutoff.wait(1)
+                if egress:
+                    # The certificate revalidation below does not depend on the route.
+                    return
                 # Revalidation at 10s imports a new, shorter evidence deadline.
                 # The idle transport must close at that deadline ahead of the
                 # next periodic check and its still-current 30-second leases.
@@ -437,7 +609,7 @@ def main():
         os.umask(0o077)
         dir=Path(td)
         ca=identity(dir,'ca')
-        for name,hosts in [('broker',['localhost']),('listener',['localhost']),('upstream',['site.test'])]:
+        for name,hosts in [('broker',['localhost']),('listener',['localhost']),('upstream',['site.test','direct.test'])]:
             identity(dir,name,ca,hosts)
         identities={u: identity(dir,u,ca) for u in ('alice','bob')}
         identities['alice-other-context'] = identities['alice']
@@ -452,13 +624,18 @@ def main():
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
             s.connect(('192.0.2.1',9))
             ip=s.getsockname()[0]
-        with server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker:
+        with (server(ip,Site,site_tls) as site, server('127.0.0.1',Broker,tls('broker')) as broker,
+              egress_proxy({'site.test': ip}) as egress):
             for shared in (False,True):
-                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails)
+                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails,
+                        ignored=egress)
                 print(('shared' if shared else 'sidecar')+(' Gateway refused to start' if startup_fails
                                                            else ' Gateway mTLS passed'))
             if startup_fails:
                 return
+            for shared in (False,True):
+                do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,egress=egress)
+                print(('shared' if shared else 'sidecar')+' Gateway mTLS through the egress proxy passed')
             do_test(dir,binary,ip,site,broker,identities,ca,True,filter_kill=True,sandbox=sandbox)
             print('filter-killed grant worker fenced')
 
