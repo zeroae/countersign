@@ -84,7 +84,11 @@ class Squid:
         self.compose,self.conf,self.logs=compose,state/"squid"/"squid.conf",state/"squid-log"
 
     def configure(self, address, allow=True):
-        text=(HERE/"squid.conf").read_text().replace("@SITE_PREFIXES@",str(ipaddress.IPv4Network(address+"/32")))
+        site=ipaddress.IPv4Address(address)
+        # Every address but the site's, so a name with one answer elsewhere is refused.
+        outside=f"0.0.0.0-{site-1} {site+1}-255.255.255.255 ::/0"
+        text=((HERE/"squid.conf").read_text().replace("@SITE_PREFIXES@",str(ipaddress.IPv4Network(address+"/32")))
+              .replace("@SITE_OUTSIDE@",outside))
         if text.count(self.ALLOW)!=1:
             raise RuntimeError("squid.conf has no single rule that allows the site")
         if not allow:
