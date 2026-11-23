@@ -9,7 +9,7 @@ The Broker and Gateway take a JSON file as a positional argument. Paths in the f
 | `countersign-broker /config/broker.json` | Opens the database, starts a new authority epoch, applies configuration and listens. |
 | `countersign-broker --recover-backup /config/broker.json` | Runs offline after a restore. Fences previous authority and leaves emergency stop enabled. |
 | `countersign-gateway serve /config/gateway.json` | Probes the chosen worker sandbox and exits if it cannot start, opens the configured issuer, publishes the sidecar public CA when applicable, and listens. |
-| `countersign-gateway env /config/gateway.json` | Writes shell-quoted exports using `proxy_url` and `ca_output`. The launcher supplies these values to the Workload. |
+| `countersign-gateway env /config/gateway.json` | Loads the configuration and runs the destination checks `serve` runs, exiting with the same error when either fails. Otherwise writes shell-quoted exports using `proxy_url` and `ca_output`. The launcher supplies these values to the Workload. |
 
 For the sidecar configuration on this page, the helper exports these four values.
 

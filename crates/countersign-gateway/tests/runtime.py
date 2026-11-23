@@ -384,17 +384,19 @@ def egress_configuration(dir, binary, config):
     def loads(proxy=None, **fields):
         write(proxy, **fields)
         return subprocess.run([binary, 'env', str(path)], capture_output=True, timeout=10).returncode == 0
-    def refused(proxy=None, **fields):
+    def refuses():
         # Both commands, and the same words from each: one line that names the cause.
-        write(proxy, **fields)
         results = [subprocess.run([binary, verb, str(path)], capture_output=True, text=True, timeout=10)
                    for verb in ('env', 'serve')]
         for result in results:
-            assert result.returncode != 0 and not result.stdout, (proxy, fields, result)
+            assert result.returncode != 0 and not result.stdout, (path.read_text(), result)
         assert results[0].stderr == results[1].stderr, results
         lines = results[0].stderr.splitlines()
         assert len(lines) == 1, lines
         return lines[0]
+    def refused(proxy=None, **fields):
+        write(proxy, **fields)
+        return refuses()
     for proxy in ('http://proxy.test:3128', 'http://127.0.0.1:3128', 'http://[::1]:3128', 'http://proxy.test:3128/'):
         assert loads(proxy), proxy
     error = refused('https://proxy.test:3128')
@@ -406,13 +408,13 @@ def egress_configuration(dir, binary, config):
                   'proxy.test:3128', ''):
         assert 'egress_proxy' in refused(proxy), proxy
     refused(3128)
-    # The startup line says which destinations leave their address policy to the egress proxy,
-    # so a configuration whose destinations fail their checks never prints it.
+    # `env` runs the destination checks `serve` runs, so the launcher meets a bad rule first. And
+    # the startup line, which names the destinations that leave their address policy to the egress
+    # proxy, is not printed for destinations that fail their checks.
     wildcard = {**base, 'id': 'wild', 'pattern': '*.' + base['pattern'].split('.', 1)[1], 'egress': 'direct'}
     path.write_text(json.dumps({**config, 'egress_proxy': 'http://proxy.test:3128', 'destinations': [rule, wildcard]}))
-    result = subprocess.run([binary, 'serve', str(path)], capture_output=True, text=True, timeout=10)
-    assert result.returncode != 0 and 'exact host and prefix' in result.stderr, result
-    assert 'Gateway egress proxy' not in result.stderr, result.stderr
+    error = refuses()
+    assert 'exact host and prefix' in error, error
     # A rule's `egress` takes one value, with or without an egress proxy.
     direct = {**base, 'egress': 'direct'}
     assert loads(**direct) and loads('http://proxy.test:3128', **direct)
