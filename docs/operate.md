@@ -87,7 +87,73 @@ The authenticated Integrator backend derives the user, Context and Workload inst
 
 Configure matching rule IDs, versions, patterns and approval scopes at the Broker and Gateway. An exact rule wins over a wildcard. For example, `*.corp.example:443` matches `api.corp.example:443` only one label below the suffix. The apex, deeper names and other ports require their own entries. By default the prompt covers only the exact host. To offer approval across the wildcard, set `whole_wildcard: true` at the Broker and `approval: "whole_wildcard"` at the Gateway. Each intercepted host still receives its own leaf.
 
-For an internal site, specify its exact DNS name and port and put its allowed addresses in `private_networks`. The parent validates the entire DNS answer set, including IPv4-mapped IPv6, before pinning one socket address. A mixed allowed/forbidden answer fails the connection. Add site-specific infrastructure and control-plane ranges to `denied_networks`. The Gateway also rejects special-use addresses including loopback, link-local, shared carrier space and known metadata endpoints. Within TLS it checks SNI and the authority of each HTTP request. [Destination fields](reference/config.md#destination-entries)
+For an internal site on a direct route, specify its exact DNS name and port and put its allowed addresses in `private_networks`. The parent validates the entire DNS answer set, including IPv4-mapped IPv6, before pinning one socket address. A mixed allowed/forbidden answer fails the connection. Add site-specific infrastructure and control-plane ranges to `denied_networks`. The Gateway also rejects special-use addresses including loopback, link-local, shared carrier space and known metadata endpoints. Within TLS it checks SNI and the authority of each HTTP request. [Destination fields](reference/config.md#destination-entries)
+
+## Reach sites through an egress proxy
+
+Some networks give the Gateway no direct route to a protected site. The only way out is an HTTP proxy that authorizes each `CONNECT` by hostname and port and passes the TLS bytes through unread. Name that proxy, the egress proxy, once in the Gateway configuration. Every destination then goes through it. A rule that should connect directly says `"egress": "direct"`. Sidecar and shared mode take the same fields.
+
+```json
+{
+  "egress_proxy": "http://proxy.internal:3128",
+  "destinations": [
+    {"id": "partner-api", "version": 1, "pattern": "api.partner.example:443", "roots": "/config/partner-roots.pem"},
+    {"id": "ledger", "version": 1, "pattern": "ledger.corp.example:443", "roots": "/config/corp-roots.pem",
+     "egress": "direct", "private_networks": ["10.20.0.0/24"]}
+  ]
+}
+```
+
+Each route puts name resolution and the site's address policy in a different place.
+
+| | Direct route | Through the egress proxy |
+| --- | --- | --- |
+| Rules | Every rule when `egress_proxy` is absent, and a rule with `"egress": "direct"` | Every other rule when `egress_proxy` is set |
+| Who resolves the site's name | The Gateway, through system DNS | The egress proxy. The Gateway resolves only the proxy's own name, on every connection, so a load balancer may change addresses |
+| Who checks the site's addresses | The Gateway: every DNS answer against `private_networks`, `denied_networks` and its special-use blocks, before it pins one address | The egress proxy's ACLs. The Gateway checks none of the site's addresses |
+| `private_networks` | Allowed, for an exact private site | Refused at startup, naming the rule. Remove the field, or set `"egress": "direct"` |
+
+Everything else stays with Countersign on both routes. A site still needs its destination rule at the Gateway and the Broker, the user still approves, and the grant and its leases cut off a connection in the same way. The Gateway verifies the site's certificate against the hostname and the rule's roots before the user's certificate signs anything, so a tunnel to the wrong machine receives no signature. The egress proxy carries only encrypted bytes.
+
+On a proxied route the egress proxy's ACLs are the site's address policy, and the Gateway no longer blocks anything for those sites. Configure the egress proxy to:
+
+- allow `CONNECT` only to the hostnames and ports of your destination rules;
+- refuse cloud metadata addresses, such as `169.254.169.254`, `fd00:ec2::254` and `168.63.129.16`, and every link-local and loopback address;
+- allow a private site only when every address its name resolves to is inside its own prefixes, where you want the check `private_networks` gave on a direct route;
+- pass TLS through without interception. An egress proxy that terminates TLS cannot present the site's certificate, so the request fails.
+
+In Squid these are `http_access` rules, read from the top, and the first that matches decides. The example below allows `api.partner.example:443`, and a private site, `billing.corp.example:443`, only when all its addresses are in its prefix `10.30.0.0/24`. The rule for each of them has no `private_networks`. The Compose demo's Squid variant qualified the Gateway against these rules, with its one site, pinned to its address, in place of these two ([`squid.conf`](https://github.com/zeroae/countersign/blob/main/examples/demo-integrator/squid.conf)). Docker's DNS gives the demo's site one address, so the refusal of a name with one address inside the prefix and one outside was checked against the same Squid on its own.
+
+```squid
+http_port 3128
+
+acl CONNECT method CONNECT
+acl tls_port port 443
+acl partner_api dstdomain api.partner.example
+acl billing dstdomain billing.corp.example
+acl billing_prefixes dst 10.30.0.0/24
+acl billing_outside dst 0.0.0.0-10.29.255.255 10.30.1.0-255.255.255.255 ::/0
+acl to_metadata dst 169.254.169.254 fd00:ec2::254 168.63.129.16
+acl to_link_local dst 169.254.0.0/16 fe80::/10
+acl to_loopback dst 127.0.0.0/8 ::1
+
+http_access deny !CONNECT
+http_access deny to_metadata
+http_access deny to_link_local
+http_access deny to_loopback
+http_access deny billing billing_outside
+http_access allow CONNECT partner_api tls_port
+http_access allow CONNECT billing tls_port billing_prefixes
+http_access deny all
+```
+
+The blocks come before the allow rules, so they hold even for an allowed name whose DNS answer is a metadata, link-local or loopback address. A `dst` ACL matches when any one of the addresses a name resolves to is in its list, and Squid may then connect to another of them. `billing_prefixes` alone would therefore let through a name with one address inside the prefix and one outside, and Squid then dialled the outside one. `billing_outside` lists every other address, so the deny on it refuses such a name, as `private_networks` does on a direct route. `http_port` has no `ssl-bump` option, so Squid passes the TLS bytes through unread. Squid 6.14 refuses a `CONNECT` these rules deny with 403, which the Workload reads as `proxy_denied`, and answers 503 when it cannot connect to the site, which the Workload reads as `upstream_failure`. A `dst` ACL does not match a name Squid cannot resolve, so a pinned site whose name does not resolve is refused with 403 too. When the site's address stops answering, Squid answers 503 only after its `connect_timeout`, one minute by default. The Gateway allows a Workload's `CONNECT` 120 seconds in all, the wait for approval included, so a lower `connect_timeout` leaves the Workload time to read `upstream_failure`.
+
+A wildcard rule behind the egress proxy reaches every host under it that the proxy allows, private ones included: on a direct route the Gateway refuses a wildcard rule for a private site, but through the proxy it cannot tell that a site is private. The Gateway also cannot stop the egress proxy from opening a tunnel to any address its ACLs allow.
+
+The egress proxy itself normally sits on a private address, such as an internal load balancer. `private_networks` and the special-use blocks do not apply to it. `denied_networks` does: an answer for the proxy's name inside it is never used.
+
+At startup the Gateway logs the egress proxy and the rules that leave their address policy to it, such as `Gateway egress proxy proxy.internal:3128 carries the address policy of destinations: partner-api`. The Gateway reads the egress proxy only from its configuration, never from `HTTPS_PROXY` or another proxy environment variable, and it always reaches the Broker directly. When the proxied leg fails, the Workload's `CONNECT` returns 502 and the Gateway does not try the site directly. `Countersign-Error` says why: `proxy_denied` when the egress proxy refused the `CONNECT`, `upstream_failure` when it answered that it could not reach the site, and `proxy_unavailable` when the Gateway could not use it at all. The egress proxy's own error page never reaches the Workload. A user can approve and the request then fail at the egress proxy, as it can at an unreachable site on a direct route. [Gateway fields](reference/config.md#gateway) · [Audit and troubleshoot](#audit-and-troubleshoot) · [ADR 0003](https://github.com/zeroae/countersign/blob/main/docs/adr/0003-the-egress-proxy-resolves-the-site-and-carries-its-address-policy.md)
 
 ## Maintain trust and stop access
 
@@ -134,6 +200,7 @@ sqlite3 -readonly /state/broker.db \
 | Gateway exits with `worker sandbox "<sandbox>" failed: <layer>: <cause>` | Run under the intended service UID, and verify the packaged Gateway rather than testing as root. The layer says what the host refused. Under `"namespaces"`, layer `namespaces`: check that `/usr/bin/bwrap` exists, the host's user namespace policy, the library mounts and the container's seccomp and AppArmor profile. Under `"filter"`, layer `launch`: check that the Gateway can run its own executable. Under either, layer `non-dumpable`, `Landlock` or `seccomp allow-list`: the container security profile refuses a call the grant worker confines itself with, or the kernel lacks seccomp filters. A host that cannot create namespaces at all needs a deliberate choice: read [Choose a worker sandbox](#choose-a-worker-sandbox). |
 | CONNECT returns 407 | Shared clients need an HTTPS proxy and one proxy bearer header. Check the token audience, expiry, broker boot, and separate service credential. |
 | CONNECT returns 403 or keeps asking for approval | Compare rule ID, version, port, grant scope, memberships and stop controls. A denied or expired prompt requires an explicit retry. Check that the Companion is paired, online and can access the selected identity. |
+| CONNECT returns 502 | Read `Countersign-Error`, and find its `Countersign-Request-ID` in the Gateway's log line `Gateway CONNECT <request ID> <error>`. `proxy_denied`: the egress proxy refused the `CONNECT` with a 4xx answer. Check that its ACLs allow the site's hostname and port. `proxy_unavailable`: the Gateway could not use the egress proxy. It could not reach it, the proxy's name resolved only inside `denied_networks`, or the proxy closed the connection, never answered or answered with something that is not HTTP. Check `egress_proxy`, the proxy itself and the network to it. `upstream_failure`: the site could not be reached, or, on either route, the Gateway could not load the rule's `roots` or `revocation` files, so check those first. On a route through the egress proxy, the proxy answered 5xx because it could not reach the site: check the proxy's DNS and route to the site. On a direct route, check the site's DNS answers against its address policy, and the route to it. The Gateway never tries a proxied destination directly. |
 | CONNECT returns 429, 503 or 504 | Inspect limits per grant/user, Broker availability, worker fencing, clock synchronization and pending approval. Capture the safe `Countersign-Error` and `Countersign-Request-ID` response headers for correlation. |
 | CONNECT succeeds, then TLS closes | Check the Workload's current public proxy CA, exact hostname/SNI, server roots/status, issuer profile, client-certificate request and native provider. Check the owned status before treating a TLS failure as an application response. |
 | A long session closes | Check grant, certificate, status and token deadlines, lease renewal, host clock drift and revocation. Closing the Companion prevents new signatures. An established connection continues while its remote authority remains valid. |

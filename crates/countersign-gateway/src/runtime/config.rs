@@ -25,6 +25,12 @@ pub(crate) struct Config {
     pub workload_token: Option<PathBuf>,
     pub workload: Option<WorkloadBinding>,
     pub destinations: Vec<Rule>,
+    /// The HTTP proxy every destination goes through, unless its rule says
+    /// `"egress": "direct"` (ADR 0003).
+    #[serde(rename = "egress_proxy")]
+    egress_proxy_url: Option<String>,
+    #[serde(skip)]
+    pub egress_proxy: Option<EgressProxy>,
     #[serde(default)]
     pub denied_networks: Vec<IpNet>,
     pub shared: Option<Shared>,
@@ -67,6 +73,77 @@ impl fmt::Display for WorkerSandbox {
     }
 }
 
+/// The egress proxy's address, as the operator wrote it: a name or an IP
+/// literal, resolved on every connection.
+#[derive(Debug, Clone)]
+pub(crate) struct EgressProxy {
+    pub host: String,
+    pub port: u16,
+}
+
+impl EgressProxy {
+    fn parse(url: &str) -> Result<Self> {
+        let shape = || {
+            invalid(
+                "egress_proxy must be an http URL with a host and a port, such as http://proxy.internal:3128",
+            )
+        };
+        let parsed = reqwest::Url::parse(url).map_err(|_| shape())?;
+        if parsed.scheme() == "https" {
+            return Err(invalid(
+                "egress_proxy must be an http URL: the Gateway sends CONNECT to the egress proxy in plain text and does not support an https egress proxy",
+            ));
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(invalid(
+                "egress_proxy must not carry credentials: the Gateway does not authenticate to the egress proxy",
+            ));
+        }
+        // The URL parser forgets a port it knows as the default, so look for
+        // one in the text: after the host, outside an IPv6 literal's brackets.
+        let authority = url
+            .split_once("://")
+            .map_or("", |(_, rest)| rest)
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default();
+        let written_port = authority
+            .rsplit(']')
+            .next()
+            .and_then(|tail| tail.rsplit_once(':'))
+            .is_some_and(|(_, port)| !port.is_empty());
+        let (Some(host), Some(port)) = (parsed.host_str(), parsed.port_or_known_default()) else {
+            return Err(shape());
+        };
+        if parsed.scheme() != "http"
+            || !written_port
+            || port == 0
+            || parsed.path() != "/"
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return Err(shape());
+        }
+        Ok(Self {
+            host: host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_owned(),
+            port,
+        })
+    }
+}
+
+impl fmt::Display for EgressProxy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.host.contains(':') {
+            write!(f, "[{}]:{}", self.host, self.port)
+        } else {
+            write!(f, "{}:{}", self.host, self.port)
+        }
+    }
+}
+
 fn default_uncertainty() -> u64 {
     1000
 }
@@ -90,14 +167,43 @@ pub(crate) struct Rule {
     pub approval: ApprovalMode,
     #[serde(default)]
     pub private_networks: Vec<IpNet>,
+    #[serde(default)]
+    pub egress: Egress,
     pub roots: PathBuf,
     #[serde(default)]
     pub revocation: Option<countersign_pki::Revocation>,
 }
 
+/// A destination's route to the site (ADR 0003).
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Egress {
+    /// Through the egress proxy when the Gateway has one, else direct. The
+    /// operator never writes it: it is what a rule without `egress` means.
+    #[default]
+    #[serde(skip_deserializing)]
+    Default,
+    /// Always direct, with the Gateway's own address policy.
+    Direct,
+}
+
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
-        let config: Self = serde_json::from_slice(&fs::read(path)?)?;
+        let mut config: Self = serde_json::from_slice(&fs::read(path)?)?;
+        config.egress_proxy = config
+            .egress_proxy_url
+            .as_deref()
+            .map(EgressProxy::parse)
+            .transpose()?;
+        if let Some(rule) = config.destinations.iter().find(|rule| {
+            config.egress_proxy_for(rule).is_some() && !rule.private_networks.is_empty()
+        }) {
+            return Err(io::Error::other(format!(
+                "destination rule {:?} has private_networks and goes through the egress proxy, which does not check them: remove private_networks, or set \"egress\": \"direct\" on the rule",
+                rule.id
+            ))
+            .into());
+        }
         let sidecar = config.shared.is_none();
         if config.workload.is_some() != sidecar
             || config.workload_token.is_some() != sidecar
@@ -128,6 +234,33 @@ impl Config {
             return Err(invalid("invalid Gateway URL scheme"));
         }
         Ok(config)
+    }
+
+    /// The egress proxy this rule's destinations go through, if any.
+    pub fn egress_proxy_for(&self, rule: &Rule) -> Option<&EgressProxy> {
+        match rule.egress {
+            Egress::Direct => None,
+            Egress::Default => self.egress_proxy.as_ref(),
+        }
+    }
+
+    /// Which destinations leave their address policy to the egress proxy, in
+    /// words for the startup log.
+    pub fn left_to_egress_proxy(&self) -> String {
+        let ids = self
+            .destinations
+            .iter()
+            .filter(|rule| self.egress_proxy_for(rule).is_some())
+            .map(|rule| rule.id.as_str())
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            "carries the address policy of no destination".to_owned()
+        } else {
+            format!(
+                "carries the address policy of destinations: {}",
+                ids.join(", ")
+            )
+        }
     }
 
     pub fn policy(&self) -> Result<DestinationPolicy> {
