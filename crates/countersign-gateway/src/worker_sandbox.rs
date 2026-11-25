@@ -67,6 +67,8 @@ pub struct ConfineError {
 /// kills it with `SIGSYS`.
 pub fn confine() -> Result<Layers, ConfineError> {
     let at = |layer| move |source| ConfineError { layer, source };
+    // Ahead of Landlock as well, which would refuse the files it reads.
+    settle_malloc().map_err(at(Layer::AllowList))?;
     prctl(libc::PR_SET_DUMPABLE, 0).map_err(at(Layer::NonDumpable))?;
     // The allow-list's no_new_privs, set ahead of Landlock and not after it:
     // an unprivileged landlock_restrict_self fails with EPERM without it
@@ -77,6 +79,40 @@ pub fn confine() -> Result<Layers, ConfineError> {
     let landlock = landlock().map_err(at(Layer::Landlock))?;
     allow_list().map_err(at(Layer::AllowList))?;
     Ok(Layers { landlock })
+}
+
+/// The C library's malloc reads two values from files the first time it needs
+/// them, and under the allow-list that read kills the grant worker (#62): the
+/// number of CPUs, for its limit on arenas, when a ninth thread needs an
+/// arena; and the kernel's overcommit policy, when a thread's heap first
+/// shrinks. Settle both while files can still be read. The limit is set to
+/// the one glibc would compute, and one heap is shrunk on a thread of its own,
+/// so glibc caches the policy.
+#[cfg(target_env = "gnu")]
+fn settle_malloc() -> io::Result<()> {
+    // SAFETY: sysconf takes one integer and no pointers.
+    let cpus = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) }.max(1);
+    // glibc's own limit on a 64-bit host: eight arenas per CPU.
+    let arenas = libc::c_int::try_from(cpus.saturating_mul(8)).unwrap_or(libc::c_int::MAX);
+    // SAFETY: mallopt takes two integers and no pointers. It returns 1 on success.
+    if unsafe { libc::mallopt(libc::M_ARENA_MAX, arenas) } != 1 {
+        return Err(io::Error::other("malloc refused M_ARENA_MAX"));
+    }
+    std::thread::spawn(|| {
+        // More than the trim threshold (128 KiB), in blocks below the mmap
+        // threshold, so they come from this thread's heap, and freeing them
+        // shrinks it.
+        let blocks: Vec<Vec<u8>> = (0..64).map(|_| vec![1; 16 * 1024]).collect();
+        drop(std::hint::black_box(blocks));
+    })
+    .join()
+    .map_err(|_| io::Error::other("the malloc warm-up thread panicked"))
+}
+
+/// The Gateway ships and is tested on glibc only (`distribution/Dockerfile`).
+#[cfg(not(target_env = "gnu"))]
+fn settle_malloc() -> io::Result<()> {
+    Ok(())
 }
 
 fn check(result: libc::c_long) -> io::Result<libc::c_long> {
