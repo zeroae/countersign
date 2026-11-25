@@ -30,6 +30,10 @@ jobs:
       - run: cargo build --locked -p countersign-gateway
       - name: Exercise shared and sidecar workers and lease cutoff
         run: timeout 120 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
+      # It ends at the Gateway's fixed 120-second deadline for a CONNECT, so it
+      # runs alone, in this job only.
+      - name: Fail a CONNECT through a silent egress proxy at the Gateway's deadline
+        run: timeout 200 python crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway --silent-egress-proxy
       - name: Name the system call when the worker sandbox's filter killed a grant worker
         if: failure()
         run: sudo dmesg | grep 'type=1326' | tail -n 20 || true
