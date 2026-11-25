@@ -3,12 +3,12 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 license = "MIT"
 repository = "https://github.com/zeroae/countersign"
 
 [workspace.dependencies]
-countersign-pki = { path = "crates/countersign-pki", version = "=0.2.1" }
-countersign-protocol = { path = "crates/countersign-protocol", version = "=0.2.1" }
+countersign-pki = { path = "crates/countersign-pki", version = "=0.2.2" }
+countersign-protocol = { path = "crates/countersign-protocol", version = "=0.2.2" }
