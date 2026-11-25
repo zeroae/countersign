@@ -1,0 +1,40 @@
+{
+  "fontSize": 14,
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "set from palette.json",
+    "fontSize": "14px",
+    "background": "{bg}",
+    "primaryColor": "{actor-fill}",
+    "primaryTextColor": "{text}",
+    "primaryBorderColor": "{box-stroke}",
+    "lineColor": "{muted}",
+    "actorBkg": "{actor-fill}",
+    "actorBorder": "{box-stroke}",
+    "actorTextColor": "{text}",
+    "actorLineColor": "{zone-stroke}",
+    "signalColor": "{muted}",
+    "signalTextColor": "{text}",
+    "labelTextColor": "{text}",
+    "noteBkgColor": "{desk-fill}",
+    "noteTextColor": "{note-text}",
+    "noteBorderColor": "{desk-stroke}"
+  },
+  "themeCSS": ".messageText{paint-order:stroke;stroke:{bg};stroke-width:6px;stroke-linejoin:round} g rect.rect{filter:none}",
+  "htmlLabels": false,
+  "deterministicIds": true,
+  "deterministicIDSeed": "countersign",
+  "sequence": {
+    "diagramMarginX": 8,
+    "diagramMarginY": 8,
+    "width": 120,
+    "height": 36,
+    "actorMargin": 20,
+    "boxMargin": 8,
+    "noteMargin": 10,
+    "messageMargin": 22,
+    "mirrorActors": false,
+    "wrap": true,
+    "useMaxWidth": false
+  }
+}

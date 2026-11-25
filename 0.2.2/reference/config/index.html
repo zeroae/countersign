@@ -1,0 +1,1347 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Desktop approval for HTTPS workloads that use an installed client certificate.">
+      
+      
+      
+        <link rel="canonical" href="https://zeroae.github.io/countersign/0.2.2/reference/config/">
+      
+      
+        <link rel="prev" href="../../architecture/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/app-icon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Configuration, CLI and environment - Countersign</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/handbook.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#service-configuration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Countersign" class="md-header__button md-logo" aria-label="Countersign" data-md-component="logo">
+      
+  <img src="../../assets/mark-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Countersign
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration, CLI and environment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zeroae/countersign" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zeroae/countersign
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Countersign" class="md-nav__button md-logo" aria-label="Countersign" data-md-component="logo">
+      
+  <img src="../../assets/mark-white.svg" alt="logo">
+
+    </a>
+    Countersign
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zeroae/countersign" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zeroae/countersign
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Countersign
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../try/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try Countersign
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../companion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the Companion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrate a service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-host and operate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture and trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration, CLI and environment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration, CLI and environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#commands-and-workload-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands and Workload environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broker
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gateway">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#destination-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Destination entries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strict-status-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strict status evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shared-issuers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared issuers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Broker API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../widget/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Widget and branding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tested platforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Develop and release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#commands-and-workload-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands and Workload environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broker
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gateway">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#destination-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Destination entries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strict-status-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strict status evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shared-issuers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared issuers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="service-configuration">Service configuration<a class="headerlink" href="#service-configuration" title="Permanent link">&para;</a></h1>
+<p>The Broker and Gateway take a JSON file as a positional argument. Paths in the file are local to the process, including its container mount namespace. Use absolute paths. Unknown fields fail deserialization. The reference Broker uses one SQLite database per Integrator and verified origin. <a href="../../operate/">Operating guide</a> · <a href="../../integrate/">Integrator guide</a></p>
+<h2 id="commands-and-workload-environment">Commands and Workload environment<a class="headerlink" href="#commands-and-workload-environment" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>countersign-broker /config/broker.json</code></td>
+<td>Opens the database, starts a new authority epoch, applies configuration and listens.</td>
+</tr>
+<tr>
+<td><code>countersign-broker --recover-backup /config/broker.json</code></td>
+<td>Runs offline after a restore. Fences previous authority and leaves emergency stop enabled.</td>
+</tr>
+<tr>
+<td><code>countersign-gateway serve /config/gateway.json</code></td>
+<td>Probes the chosen worker sandbox and exits if it cannot start, opens the configured issuer, publishes the sidecar public CA when applicable, and listens.</td>
+</tr>
+<tr>
+<td><code>countersign-gateway env /config/gateway.json</code></td>
+<td>Loads the configuration and runs the destination checks <code>serve</code> runs, exiting with the same error when either fails. Otherwise writes shell-quoted exports using <code>proxy_url</code> and <code>ca_output</code>. The launcher supplies these values to the Workload.</td>
+</tr>
+</tbody>
+</table>
+<p>For the sidecar configuration on this page, the helper exports these four values.</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">HTTPS_PROXY</span><span class="o">=</span><span class="s1">'http://gateway:8080'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">SSL_CERT_FILE</span><span class="o">=</span><span class="s1">'/trust/sidecar.pem'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">REQUESTS_CA_BUNDLE</span><span class="o">=</span><span class="s1">'/trust/sidecar.pem'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">NODE_EXTRA_CA_CERTS</span><span class="o">=</span><span class="s1">'/trust/sidecar.pem'</span>
+</code></pre></div>
+<p>Configure proxy use in the HTTP client or adapter the Workload runs. Clear any <code>NO_PROXY</code> bypass for the protected site. The Compose curl Workload also sets <code>CURL_CA_BUNDLE</code> to that public PEM. With an HTTPS shared proxy, configure the client to trust the listener certificate as well as the intercepted site's proxy leaf, for example with curl's <code>--proxy-cacert</code> and <code>--cacert</code> respectively.</p>
+<h2 id="broker">Broker<a class="headerlink" href="#broker" title="Permanent link">&para;</a></h2>
+<p>This example uses the demo's destination, service names and mounted paths. The reference launcher substitutes the configured desktop-facing port for <code>8443</code>. Each executable runs in its own container. <a href="https://github.com/zeroae/countersign/blob/fbb5aa7c951f8b70a238f3351140aa44a6184adf/examples/demo-integrator/compose_demo.py">Demo configuration generator</a></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"origin"</span><span class="p">:</span><span class="w"> </span><span class="s2">"localhost:8443"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"listen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.0.0.0:9443"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"integrator"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/state/broker.db"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"backend_token_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/backend.token"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"workload_hmac_key_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/workload.hmac"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"client_ca_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/client-ca.pem"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tls"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"certificate_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/broker.pem"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"key_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/broker.key"</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"destinations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo-site"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"site.test:9444"</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required or default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>origin</code></td>
+<td>Required</td>
+<td>Verified Integrator DNS authority in <code>host:port</code> form. An omitted port means 443. Use the origin the user pairs with.</td>
+</tr>
+<tr>
+<td><code>listen</code></td>
+<td>Required</td>
+<td>Listener IP address and port. A plain HTTP listener must be loopback, behind Integrator HTTPS ingress.</td>
+</tr>
+<tr>
+<td><code>integrator</code></td>
+<td>Required</td>
+<td>Stable opaque Integrator ID. The database records this ID and origin.</td>
+</tr>
+<tr>
+<td><code>database</code></td>
+<td>Required</td>
+<td>SQLite file. The Broker needs write access to its directory for the database and sibling lock file.</td>
+</tr>
+<tr>
+<td><code>backend_token_file</code></td>
+<td>Required</td>
+<td>Private text bearer secret shared by the Broker and the authenticated Integrator backend.</td>
+</tr>
+<tr>
+<td><code>workload_hmac_key_file</code></td>
+<td>Required</td>
+<td>Private raw bytes used to derive the boot-specific HS256 signing key.</td>
+</tr>
+<tr>
+<td><code>gateway_token_file</code></td>
+<td>Optional</td>
+<td>Separate text service secret required for shared-mode Gateway authentication.</td>
+</tr>
+<tr>
+<td><code>admin_token_file</code></td>
+<td>Optional</td>
+<td>Separate text service secret for <code>POST /v1/admin/control</code>. Set it to operate or clear stops.</td>
+</tr>
+<tr>
+<td><code>client_ca_file</code></td>
+<td>Required</td>
+<td>Default PEM trust anchors for native client chains. Per-entry <code>client_trust.ca_file</code> overrides the path.</td>
+</tr>
+<tr>
+<td><code>destinations</code></td>
+<td>Required</td>
+<td>Array of Broker destination entries. Fields are listed below.</td>
+</tr>
+<tr>
+<td><code>max_duration_s</code></td>
+<td><code>28800</code></td>
+<td>Positive maximum approval duration in seconds. The suggested duration is the smaller of one hour and this maximum.</td>
+</tr>
+<tr>
+<td><code>audit_retention_days</code></td>
+<td><code>30</code></td>
+<td>Positive retention in days for audit and security history.</td>
+</tr>
+<tr>
+<td><code>tls</code></td>
+<td>Optional</td>
+<td>Object with required <code>certificate_path</code> (PEM listener chain) and <code>key_path</code> (PEM private key). Required for a non-loopback bind.</td>
+</tr>
+<tr>
+<td><code>web_push</code></td>
+<td>Optional</td>
+<td>Enables ID-only offline notifications. Set <code>vapid_key_file</code> to a private unpadded base64url 32-byte P-256 scalar, <code>contact</code> to a <code>mailto:</code> URI and <code>allowed_hosts</code> to a nonempty list of exact push-service domains.</td>
+</tr>
+</tbody>
+</table>
+<p>Use independent random values for the HMAC key and each bearer secret. The service enforces a 32-byte minimum and rejects reused values. Keep the token files readable only by the services that use them. These commands create the required secrets in a new, private Broker configuration directory.</p>
+<div class="highlight"><pre><span></span><code><span class="nb">umask</span><span class="w"> </span><span class="m">077</span>
+openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>backend.token
+openssl<span class="w"> </span>rand<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>workload.hmac
+</code></pre></div>
+<h2 id="gateway">Gateway<a class="headerlink" href="#gateway" title="Permanent link">&para;</a></h2>
+<p>This sidecar example assumes the Gateway's private Workload-facing address is <code>172.22.0.2</code> and the site resolves to <code>172.23.0.4</code>. Use the actual interface address and site prefix for your network. The Compose launcher discovers both. The <code>workload</code> object matches the binding returned by the demo Integrator's authenticated backend call.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"listen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"172.22.0.2:8080"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"proxy_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://gateway:8080"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"ca_output"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/trust/sidecar.pem"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"broker_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://broker:9443"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"broker_ca"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/ca.pem"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"workload_token"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/credential/workload.jwt"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"workload"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"integrator"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo-user"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo-context"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"workload"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo-curl"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"workload_generation"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"destinations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"demo-site"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"site.test:9444"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"private_networks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"172.23.0.4/32"</span><span class="p">],</span>
+<span class="w">      </span><span class="nt">"roots"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/config/ca.pem"</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required or default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>listen</code></td>
+<td>Required</td>
+<td>Listener IP address and port. Choose a private Workload endpoint in sidecar mode.</td>
+</tr>
+<tr>
+<td><code>proxy_url</code></td>
+<td>Required</td>
+<td>Workload-facing listener origin. Use <code>http</code> for sidecars and <code>https</code> for shared mode.</td>
+</tr>
+<tr>
+<td><code>broker_url</code></td>
+<td>Required</td>
+<td>HTTPS origin for the Broker. Both URL fields accept an origin with an optional port and root path. Credentials, query strings and fragments cause an error.</td>
+</tr>
+<tr>
+<td><code>broker_ca</code></td>
+<td>Required</td>
+<td>PEM anchors for the Broker's TLS listener or its HTTPS ingress.</td>
+</tr>
+<tr>
+<td><code>ca_output</code></td>
+<td>Required in both modes</td>
+<td>The sidecar writes its public CA here. Create the parent directory before startup. In shared mode supply the path of the public trust PEM you distribute. The helper uses this path in both modes.</td>
+</tr>
+<tr>
+<td><code>workload_token</code></td>
+<td>Sidecar only, required</td>
+<td>Private file containing the backend-issued Workload bearer token. The Gateway rereads it on Broker calls.</td>
+</tr>
+<tr>
+<td><code>workload</code></td>
+<td>Sidecar only, required</td>
+<td>Object containing <code>integrator</code>, <code>user</code>, <code>context</code>, <code>workload</code> IDs and a positive <code>workload_generation</code>.</td>
+</tr>
+<tr>
+<td><code>destinations</code></td>
+<td>Required</td>
+<td>Array of Gateway entries. A sidecar needs at least one to construct its CA constraints.</td>
+</tr>
+<tr>
+<td><code>denied_networks</code></td>
+<td><code>[]</code></td>
+<td>Additional IPv4 or IPv6 CIDRs to block: for every destination on a direct route, and for the egress proxy's own addresses.</td>
+</tr>
+<tr>
+<td><code>egress_proxy</code></td>
+<td>Omitted → every destination connects directly</td>
+<td>The egress proxy: an <code>http</code> URL with a host and a port, such as <code>http://proxy.internal:3128</code>. Every destination goes through it, unless its rule says <code>"egress": "direct"</code>. The Gateway resolves the proxy's host through system DNS on every connection, drops any answer inside <code>denied_networks</code>, and sends a plain-text <code>CONNECT</code> with the site's name and port and no credentials. It resolves nothing for the site: the egress proxy does, and its ACLs are that site's address policy. An <code>https</code> URL, a URL with credentials, a path, a query or fragment, or a missing port fails loading. The Gateway never takes the egress proxy from a proxy environment variable such as <code>HTTPS_PROXY</code>, never tries a proxied destination directly, and always reaches the Broker directly. <a href="../../operate/#reach-sites-through-an-egress-proxy">Reach sites through an egress proxy</a></td>
+</tr>
+<tr>
+<td><code>clock_uncertainty_ms</code></td>
+<td><code>1000</code></td>
+<td>Allowed UTC difference from the Broker, in milliseconds, from 0 through 29999. The Gateway subtracts the margin from absolute deadlines and checks its local clock against monotonic elapsed time.</td>
+</tr>
+<tr>
+<td><code>worker_sandbox</code></td>
+<td><code>"namespaces"</code></td>
+<td>The worker sandbox for every grant worker, in sidecar and shared mode. <code>"namespaces"</code> is the namespace sandbox: bubblewrap gives each grant worker its own filesystem, process and network view, and the grant worker then confines itself with a seccomp allow-list, Landlock and non-dumpable memory. It needs <code>/usr/bin/bwrap</code> and a host that lets the Gateway create namespaces. <code>"filter"</code> is the filter sandbox: the same confinement without the namespaces, for a host that refuses them, such as ECS Fargate. It needs no bubblewrap. Any other value fails loading. The Gateway never switches from one to the other. <a href="../../operate/#choose-a-worker-sandbox">Choose a worker sandbox</a></td>
+</tr>
+<tr>
+<td><code>shared</code></td>
+<td>Omitted → sidecar</td>
+<td>Shared-mode object. Requires PEM <code>listener_cert</code> and <code>listener_key</code>, a <code>gateway_token</code> file holding the Broker's matching service secret, and a <code>ca</code> source below. Omit both sidecar Workload fields.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="destination-entries">Destination entries<a class="headerlink" href="#destination-entries" title="Permanent link">&para;</a></h3>
+<p>Use a unique stable <code>id</code>, positive <code>version</code>, and unique <code>pattern</code> at both services. Patterns are DNS authorities with an optional port (default 443), e.g. <code>api.example.org:443</code> or <code>*.example.org:443</code>. The wildcard consumes one whole leftmost label. Exact entries take precedence. A downstream CONNECT requires an explicit port.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Process</th>
+<th>Default and purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>whole_wildcard</code></td>
+<td>Broker</td>
+<td><code>false</code>. Set to <code>true</code> on a wildcard entry to offer a grant for the wildcard scope.</td>
+</tr>
+<tr>
+<td><code>client_trust</code></td>
+<td>Broker</td>
+<td>Optional object. <code>ca_file</code> selects alternative PEM client roots. <code>user_fingerprints</code> maps user IDs to allowed leaf SHA-256 fingerprints (standard padded base64 of 32 bytes). Omission permits identities passing the other checks. A supplied map requires a match for that user. <code>revocation</code> configures status imports.</td>
+</tr>
+<tr>
+<td><code>approval</code></td>
+<td>Gateway</td>
+<td><code>"exact_host"</code>. Set to <code>"whole_wildcard"</code> only for a wildcard with the corresponding Broker setting.</td>
+</tr>
+<tr>
+<td><code>private_networks</code></td>
+<td>Gateway</td>
+<td><code>[]</code>. For an exact private destination on a direct route, list allowed CIDRs. When present, every DNS answer must be within the configured prefixes and pass the address safety checks. With <code>egress_proxy</code> set, a rule that has <code>private_networks</code> and no <code>"egress": "direct"</code> fails loading, because nobody would check them: remove the field, or set <code>"egress": "direct"</code>.</td>
+</tr>
+<tr>
+<td><code>egress</code></td>
+<td>Gateway</td>
+<td>Omitted → through <code>egress_proxy</code> when it is set, else direct. <code>"direct"</code> connects to the site directly, with the Gateway's own address policy, even when <code>egress_proxy</code> is set. Without <code>egress_proxy</code> it changes nothing. Any other value fails loading.</td>
+</tr>
+<tr>
+<td><code>roots</code></td>
+<td>Gateway</td>
+<td>Required PEM server trust anchors for this site's upstream certificate.</td>
+</tr>
+<tr>
+<td><code>revocation</code></td>
+<td>Gateway</td>
+<td>Optional strict status imports for the upstream server chain.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="strict-status-evidence">Strict status evidence<a class="headerlink" href="#strict-status-evidence" title="Permanent link">&para;</a></h3>
+<p>These JSON values can be used for the Broker's <code>destinations[].client_trust.revocation</code> or the Gateway's <code>destinations[].revocation</code>. Select evidence for the chain validated by that service.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="s2">"crl"</span><span class="p">,</span><span class="nt">"files"</span><span class="p">:[</span><span class="s2">"/status/issuing-ca.crl"</span><span class="p">]}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="s2">"ocsp"</span><span class="p">,</span><span class="nt">"files"</span><span class="p">:[</span><span class="s2">"/status/leaf.ocsp"</span><span class="p">,</span><span class="s2">"/status/intermediate.ocsp"</span><span class="p">],</span><span class="nt">"max_age_s"</span><span class="p">:</span><span class="mi">3600</span><span class="p">}</span>
+</code></pre></div>
+<p>Supply 1–32 paths that the service can read and only trusted administrators can replace. Each file contains a complete DER object of at most 4 MiB. Publish replacements atomically. The CRL profile expects a complete direct CRL per issuer, with fresh <code>nextUpdate</code>. For OCSP, supply signed good status for each non-anchor certificate in the ordered chain. <code>max_age_s</code> is optional and positive. It caps freshness at <code>thisUpdate + max_age_s</code> and supplies a deadline for responses that omit <code>nextUpdate</code>. Without a maximum age, <code>nextUpdate</code> is required. In either mode the service also checks the certificate path and validity. The operator supplies updated evidence independently of Countersign.</p>
+<h3 id="shared-issuers">Shared issuers<a class="headerlink" href="#shared-issuers" title="Permanent link">&para;</a></h3>
+<p>Set exactly one source in <code>shared.ca</code>. A local issuer uses a certificate chain and its matching signing key.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="s2">"local"</span><span class="p">,</span><span class="nt">"cert"</span><span class="p">:</span><span class="s2">"/issuer/proxy-ca-chain.pem"</span><span class="p">,</span><span class="nt">"key"</span><span class="p">:</span><span class="s2">"/issuer/proxy-ca.key"</span><span class="p">}</span>
+</code></pre></div>
+<p>Put the signing CA first and trust anchor last in the PEM chain. Supply a matching PEM private key. A self-signed issuing root can occupy both roles. The signing CA must be currently valid, carry CA basic constraints and permit certificate signing.</p>
+<p>For a remote issuer the Gateway calls ACM-PCA <code>IssueCertificate</code> followed by <code>GetCertificate</code>. The example identifiers below describe an AWS P-256 CA with a server-auth end-entity template. Supply your actual authority, algorithm and template. <a href="https://docs.aws.amazon.com/privateca/latest/userguide/template-definitions.html">AWS Private CA template definitions</a></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"acm_pca"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"profile"</span><span class="p">:</span><span class="w"> </span><span class="s2">"proxy-issuer"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="s2">"us-east-1"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"ca_arn"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-4234-8234-123456789012"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arn:aws:acm-pca:::template/EndEntityServerAuthCertificate/V1"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"signing_algorithm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SHA256WITHECDSA"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"roots"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/issuer/proxy-roots.pem"</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Remote field</th>
+<th>Required or default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ca_arn</code>, <code>template</code></td>
+<td>Required</td>
+<td>The authority identifier and template accepted by that endpoint. The template must issue the worker's exact DNS SAN and a server-auth leaf within the absolute expiry requested.</td>
+</tr>
+<tr>
+<td><code>signing_algorithm</code></td>
+<td>Required</td>
+<td>ACM-PCA enum value compatible with the configured CA key.</td>
+</tr>
+<tr>
+<td><code>roots</code></td>
+<td>Required</td>
+<td>PEM trust anchors for checking the issued leaf chain. These validate the proxy leaf. The SDK handles HTTPS transport to the issuer separately.</td>
+</tr>
+<tr>
+<td><code>profile</code>, <code>region</code></td>
+<td>Optional</td>
+<td>AWS shared profile and region. Omitted values come from the SDK's configuration chain. Credentials remain with the Gateway supervisor.</td>
+</tr>
+<tr>
+<td><code>endpoint</code></td>
+<td>Optional</td>
+<td>Explicit HTTPS issuer URL. Overrides endpoint selection from the shared SDK configuration.</td>
+</tr>
+<tr>
+<td><code>expected_uri</code></td>
+<td>Optional</td>
+<td>Use only for a template that must add exactly this URI SAN alongside the one allowed DNS SAN.</td>
+</tr>
+</tbody>
+</table>
+<p>For AWS Private CA, use the configured account, region and credentials. For an ACM-PCA-compatible deployment such as ZAE-ZCM, select its authority and template in the same JSON and set up the standard AWS shared config. The example below is a Gateway service account's <code>~/.aws/config</code>. Use the actual endpoint, deployment ID and credential helper profile.</p>
+<div class="highlight"><pre><span></span><code><span class="k">[profile proxy-issuer]</span>
+<span class="na">region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">us-east-1</span>
+<span class="na">credential_process</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">zcm-creds --endpoint https://abcdefghij.execute-api.us-east-1.amazonaws.com/ --server-id example-deployment --profile work</span>
+<span class="na">services</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">proxy-services</span>
+
+<span class="k">[services proxy-services]</span>
+<span class="na">acm_pca</span><span class="w"> </span><span class="o">=</span>
+<span class="w">  </span><span class="na">endpoint_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">https://abcdefghij.execute-api.us-east-1.amazonaws.com/</span>
+</code></pre></div>
+<p>The service key in this profile is <code>acm_pca</code>. Keep the helper and its credentials accessible only to the supervisor. A controlled SDK fixture checks endpoint selection, issued leaf validation and TLS use. Operational qualification requires the real issuing service and its template. <a href="https://github.com/zeroae/zae-zcm#configure-a-profile">ZAE-ZCM profile documentation</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Architecture and trust">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Architecture and trust
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../api/" class="md-footer__link md-footer__link--next" aria-label="Next: Broker API">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Broker API
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

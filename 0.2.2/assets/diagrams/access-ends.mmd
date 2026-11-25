@@ -1,0 +1,24 @@
+%%{init: {"sequence": {"actorMargin": 70}}}%%
+sequenceDiagram
+    accTitle: What happens when the desktop quits or the user revokes access
+    accDescr: Two cases. If the user quits the Companion, existing traffic can keep renewing leases but no fresh handshake can be signed. If the user revokes, the Broker records it, refuses further renewal, and the Gateway closes both sockets by the current lease deadline.
+    participant C as Companion
+    participant B as Broker
+    participant G as Gateway
+    Note over C,G: A connection already has a valid grant and traffic leases
+    rect {band-request}
+    Note over C,G: Case 1: the user quits the Companion
+    C--xB: Signing channel closes
+    G->>B: Renew for existing traffic
+    B-->>G: Lease within grant expiry
+    Note over C,G: A fresh handshake needs the approving Companion back online
+    end
+    rect {band-sign}
+    Note over C,G: Case 2: the user revokes access
+    C->>B: Request revocation once online
+    B-->>C: Revocation recorded
+    B-->>G: Retirement notice, if delivered
+    G->>B: Next renewal, if notice lost
+    B-->>G: Refused
+    Note over B,G: Close both sockets by the current lease deadline
+    end
