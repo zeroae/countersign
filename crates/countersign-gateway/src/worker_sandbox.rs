@@ -67,7 +67,9 @@ pub struct ConfineError {
 /// kills it with `SIGSYS`.
 pub fn confine() -> Result<Layers, ConfineError> {
     let at = |layer| move |source| ConfineError { layer, source };
-    // Ahead of Landlock as well, which would refuse the files it reads.
+    // Ahead of every layer: Landlock would refuse the files it reads, and its
+    // warm-up thread has to end before any layer goes on, since each binds
+    // only the calling thread and the threads it starts later.
     settle_malloc().map_err(at(Layer::AllowList))?;
     prctl(libc::PR_SET_DUMPABLE, 0).map_err(at(Layer::NonDumpable))?;
     // The allow-list's no_new_privs, set ahead of Landlock and not after it:
@@ -81,32 +83,48 @@ pub fn confine() -> Result<Layers, ConfineError> {
     Ok(Layers { landlock })
 }
 
+/// glibc's default trim threshold: a thread's heap shrinks once this much at
+/// its top is free.
+#[cfg(target_env = "gnu")]
+const TRIM_THRESHOLD: usize = 128 * 1024;
+
+/// A block the warm-up allocates: below the mmap threshold, so it comes from
+/// the thread's heap.
+#[cfg(target_env = "gnu")]
+const WARM_UP_BLOCK: usize = 16 * 1024;
+
 /// The C library's malloc reads two values from files the first time it needs
 /// them, and under the allow-list that read kills the grant worker (#62): the
 /// number of CPUs, for its limit on arenas, when a ninth thread needs an
 /// arena; and the kernel's overcommit policy, when a thread's heap first
-/// shrinks. Settle both while files can still be read. The limit is set to
-/// the one glibc would compute, and one heap is shrunk on a thread of its own,
-/// so glibc caches the policy.
+/// shrinks. Settle both while files can still be read: give malloc its arena
+/// limit, and shrink one heap on a thread of its own, so glibc caches the
+/// policy.
 #[cfg(target_env = "gnu")]
 fn settle_malloc() -> io::Result<()> {
-    // SAFETY: sysconf takes one integer and no pointers.
-    let cpus = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) }.max(1);
-    // glibc's own limit on a 64-bit host: eight arenas per CPU.
+    // Eight arenas per CPU this process may use, glibc's factor on a 64-bit
+    // host, the only kind the allow-list is written for.
+    let cpus = std::thread::available_parallelism().map_or(1, usize::from);
     let arenas = libc::c_int::try_from(cpus.saturating_mul(8)).unwrap_or(libc::c_int::MAX);
-    // SAFETY: mallopt takes two integers and no pointers. It returns 1 on success.
-    if unsafe { libc::mallopt(libc::M_ARENA_MAX, arenas) } != 1 {
-        return Err(io::Error::other("malloc refused M_ARENA_MAX"));
+    // A threshold set by hand no longer rises when a large mapped block is
+    // freed, so the warm-up below always frees more than it.
+    let trim = libc::c_int::try_from(TRIM_THRESHOLD).expect("the threshold fits");
+    for (option, value) in [(libc::M_ARENA_MAX, arenas), (libc::M_TRIM_THRESHOLD, trim)] {
+        // mallopt returns 1 on success.
+        // SAFETY: mallopt takes two integers and no pointers.
+        if unsafe { libc::mallopt(option, value) } != 1 {
+            return Err(io::Error::other(format!("malloc refused option {option}")));
+        }
     }
-    std::thread::spawn(|| {
-        // More than the trim threshold (128 KiB), in blocks below the mmap
-        // threshold, so they come from this thread's heap, and freeing them
-        // shrinks it.
-        let blocks: Vec<Vec<u8>> = (0..64).map(|_| vec![1; 16 * 1024]).collect();
-        drop(std::hint::black_box(blocks));
-    })
-    .join()
-    .map_err(|_| io::Error::other("the malloc warm-up thread panicked"))
+    std::thread::Builder::new()
+        .spawn(|| {
+            let blocks: Vec<Vec<u8>> = (0..8 * TRIM_THRESHOLD / WARM_UP_BLOCK)
+                .map(|_| vec![1; WARM_UP_BLOCK])
+                .collect();
+            drop(std::hint::black_box(blocks));
+        })?
+        .join()
+        .map_err(|_| io::Error::other("the malloc warm-up thread panicked"))
 }
 
 /// The Gateway ships and is tested on glibc only (`distribution/Dockerfile`).

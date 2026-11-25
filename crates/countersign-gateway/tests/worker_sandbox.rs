@@ -364,12 +364,14 @@ mod linux {
         Ok(())
     }
 
-    /// A thread that allocates more than the C library's trim threshold
+    /// A thread that allocates far more than the C library's trim threshold
     /// (128 KiB) and frees it, as a connection thread does after a large
-    /// response: its heap then shrinks, for the first time in this process.
+    /// response: its heap then shrinks, for the first time since confinement.
     fn free_a_heap() -> Result<(), i32> {
         std::thread::spawn(|| {
-            let blocks: Vec<Vec<u8>> = (0..64).map(|_| vec![1; 16 * 1024]).collect();
+            // 8 MiB in blocks of 4 KiB: neither the size nor the shape of
+            // confinement's own warm-up.
+            let blocks: Vec<Vec<u8>> = (0..2048).map(|_| vec![1; 4 * 1024]).collect();
             drop(std::hint::black_box(blocks));
         })
         .join()
