@@ -102,9 +102,14 @@ const WARM_UP_BLOCK: usize = 16 * 1024;
 /// policy.
 #[cfg(target_env = "gnu")]
 fn settle_malloc() -> io::Result<()> {
-    // Eight arenas per CPU this process may use, glibc's factor on a 64-bit
-    // host, the only kind the allow-list is written for.
-    let cpus = std::thread::available_parallelism().map_or(1, usize::from);
+    // Eight arenas per CPU in the process's affinity mask: the limit that
+    // glibc 2.36, in the Gateway's image, computes on a 64-bit host, the only
+    // kind the allow-list is written for. glibc 2.39 counts online CPUs,
+    // which are as many or more.
+    let cpus = cpus_in_affinity_mask().unwrap_or_else(|| {
+        // SAFETY: sysconf takes one integer and no pointers.
+        usize::try_from(unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) }).unwrap_or(1)
+    });
     let arenas = libc::c_int::try_from(cpus.saturating_mul(8)).unwrap_or(libc::c_int::MAX);
     // A threshold set by hand no longer rises when a large mapped block is
     // freed, so the warm-up below always frees more than it.
@@ -125,6 +130,20 @@ fn settle_malloc() -> io::Result<()> {
         })?
         .join()
         .map_err(|_| io::Error::other("the malloc warm-up thread panicked"))
+}
+
+/// How many CPUs the process may run on, as `sched_getaffinity` reports them.
+#[cfg(target_env = "gnu")]
+fn cpus_in_affinity_mask() -> Option<usize> {
+    // SAFETY: an all-zero `cpu_set_t` is a valid, empty set.
+    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    // SAFETY: the set is as large as the size passed, and pid 0 is this thread.
+    if unsafe { libc::sched_getaffinity(0, std::mem::size_of_val(&set), &mut set) } != 0 {
+        return None;
+    }
+    // SAFETY: the set was filled in by sched_getaffinity above.
+    let count = unsafe { libc::CPU_COUNT(&set) };
+    usize::try_from(count).ok().filter(|&count| count > 0)
 }
 
 /// The Gateway ships and is tested on glibc only (`distribution/Dockerfile`).
