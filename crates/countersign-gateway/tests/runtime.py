@@ -590,9 +590,10 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 return logged.wait_for(lambda: any(re.fullmatch(pattern, line) for line in log), timeout)
         def alive(pid):
             # A killed process stays listed until its new parent collects it.
+            # Collected between the open and the read, it reads as ESRCH.
             try:
                 return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0] != 'Z'
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 return False
         def descendants(pid):
             child_list = Path(f'/proc/{pid}/task/{pid}/children')
