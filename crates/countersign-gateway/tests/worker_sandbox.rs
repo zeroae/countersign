@@ -49,6 +49,9 @@ mod linux {
     /// allow-list, which gives the same answer (ADR 0002). So this setup
     /// differs from a confined one only before confinement.
     const NO_CLONE3: &str = "no-clone3";
+    /// Before it confines itself, the stand-in frees a block large enough to
+    /// be mapped on its own, which raises the C library's trim threshold (#62).
+    const LARGE_BLOCK_FREED: &str = "large-block-freed";
 
     /// Stands in for a secret in the supervisor's or a grant worker's memory.
     static SECRET: [u8; 16] = *b"keep-this-secret";
@@ -94,6 +97,9 @@ mod linux {
             LANDLOCK_REFUSED => fail_with(libc::SYS_landlock_restrict_self, libc::EPERM),
             LANDLOCK_DENIED => fail_with(libc::SYS_landlock_create_ruleset, libc::EPERM),
             NO_CLONE3 => fail_with(libc::SYS_clone3, libc::ENOSYS),
+            // Not a host's quirk but code that ran first: 2 MiB, freed, moves
+            // glibc's trim threshold to 4 MiB, above confinement's warm-up.
+            LARGE_BLOCK_FREED => drop(std::hint::black_box(vec![1u8; 2 << 20])),
             _ => assert_eq!(setup, CONFINED),
         }
     }
@@ -828,6 +834,18 @@ mod linux {
                         "a reply",
                     );
                 }
+            },
+        ),
+        (
+            "a_large_block_freed_before_confinement_leaves_the_warm_up_working",
+            || {
+                // A heap freed after confinement still shrinks without a read.
+                each_of_two(
+                    LARGE_BLOCK_FREED,
+                    |_| "free-heap".into(),
+                    |o| *o == Outcome::GotThrough,
+                    "a reply",
+                );
             },
         ),
         (
