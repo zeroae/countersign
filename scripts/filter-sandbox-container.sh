@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Prove the filter sandbox on a host that refuses namespaces, as ECS Fargate
 # does: run the Gateway's containment test and its runtime test in a container
-# under Docker's default security profile, as an unprivileged user. Two last
+# under Docker's default security profile, as an unprivileged user. Three last
 # steps each use a profile with one quirk instead: a host that refuses the
-# allow-list, and a kernel without close_range.
+# allow-list, a kernel without Landlock, and a kernel without close_range.
 #
 # Usage: scripts/filter-sandbox-container.sh
 # Needs Docker and the Rust toolchain. Builds on this host and runs what it
@@ -95,6 +95,12 @@ echo '== The filter sandbox fails at startup with the named error'
 refusing '{"names": ["prctl"], "action": "SCMP_ACT_ERRNO", "errnoRet": 22,
            "args": [{"index": 0, "value": 22, "op": "SCMP_CMP_EQ"}]}'
 inside namespaces "${runtime[@]}" --worker-sandbox filter --startup-fails 'seccomp allow-list'
+
+# A kernel before 5.13, or one built without Landlock, answers ENOSYS. The
+# filter sandbox starts there with its other layers, and says so.
+echo '== The filter sandbox starts on a kernel without Landlock'
+refusing '{"names": ["landlock_create_ruleset"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38}'
+inside filter "${runtime[@]}" --worker-sandbox filter --landlock unavailable
 
 # Linux before 5.11 cannot mark every descriptor close-on-exec in one call.
 # 38 is ENOSYS, as such a kernel answers.

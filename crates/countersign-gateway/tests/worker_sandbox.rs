@@ -205,6 +205,7 @@ mod linux {
                 "fork" => fork(),
                 "clone3" => clone3(),
                 "signal-on-io" => signal_on_io(number(1) as libc::pid_t),
+                "panic" => panic_on_a_thread(),
                 #[cfg(target_arch = "x86_64")]
                 "x32" => x32(),
                 #[cfg(target_arch = "x86_64")]
@@ -350,6 +351,14 @@ mod linux {
     fn signal_on_io(pid: libc::pid_t) -> Result<(), i32> {
         // SAFETY: F_SETOWN takes one integer.
         checked(unsafe { libc::fcntl(0, libc::F_SETOWN, pid) })
+    }
+
+    /// A thread that panics and unwinds, as a grant worker's thread does on a
+    /// bug. Unwinding runs code that nothing before it has run.
+    fn panic_on_a_thread() -> Result<(), i32> {
+        let thread = std::thread::spawn(|| panic!("the panic this test asks for"));
+        assert!(thread.join().is_err(), "the thread did not panic");
+        Ok(())
     }
 
     /// A system call no grant worker needs.
@@ -758,6 +767,17 @@ mod linux {
                 refused_only_when_confined(|t| format!("signal-on-io {}", t.other_pid));
             },
         ),
+        ("a_panic_unwinds_and_the_grant_worker_lives_on", || {
+            // A stand-in's first panic, so its first unwind, comes after confinement.
+            for setup in [UNCONFINED, CONFINED] {
+                each_of_two(
+                    setup,
+                    |_| "panic".into(),
+                    |o| *o == Outcome::GotThrough,
+                    "a reply",
+                );
+            }
+        }),
         ("returning_from_a_signal_handler_works", || {
             for worker in 0..2 {
                 let mut pair = [StandIn::start(CONFINED), StandIn::start(CONFINED)];
