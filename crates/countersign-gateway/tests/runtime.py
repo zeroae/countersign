@@ -2,10 +2,11 @@
 directly and through a test-only egress proxy.
 
 Usage: python3 crates/countersign-gateway/tests/runtime.py target/debug/countersign-gateway
-           [--worker-sandbox namespaces|filter] [--startup-fails LAYER]
+           [--worker-sandbox namespaces|filter] [--startup-fails LAYER] [--landlock unavailable]
 Requires libnss-wrapper, curl with HTTPS proxy support, and python-cryptography, and bubblewrap
 for the namespace sandbox. --startup-fails is for a host that refuses LAYER of the chosen worker
 sandbox: the Gateway has to exit with the error that names the sandbox and that layer.
+--landlock unavailable is for a host without Landlock: the Gateway has to start and say so.
 No host DNS or trust store modifications.
 """
 import base64
@@ -135,6 +136,13 @@ class Fixture(Counting, http.server.ThreadingHTTPServer):
 class Site(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         fingerprint = hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest().encode()
+        if self.path == '/together':
+            # Answered only once another request waits here too.
+            try:
+                self.server.together.wait()
+            except threading.BrokenBarrierError:
+                self.send_error(503)
+                return
         if self.path == '/slow':
             self.send_response(200)
             self.send_header('content-length', '1000000')
@@ -428,7 +436,7 @@ def egress_configuration(dir, binary, config):
 
 
 def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=False, sandbox=None,
-            startup_fails=None, egress=None, ignored=None, unusable=None):
+            startup_fails=None, landlock=None, egress=None, ignored=None, unusable=None):
     """With `egress`, a test-only egress proxy, the Gateway reaches the site only through it. With
     `ignored` instead, the Gateway's environment names that proxy, and the Gateway connects directly.
     With `unusable` as well as `egress`, configuration that leaves the Gateway no usable egress proxy,
@@ -564,7 +572,8 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
             # Startup names the worker sandbox and every layer its probe worker applied.
             assert wait_for_log(('Gateway worker sandbox "filter": ' if sandbox == 'filter' else
                                  'Gateway worker sandbox "namespaces": namespaces, ') + 'non-dumpable, '
-                                r'Landlock (ABI v[1-9]\d*|unavailable), seccomp allow-list'), log
+                                + ('Landlock unavailable' if landlock == 'unavailable' else
+                                   r'Landlock (ABI v[1-9]\d*|unavailable)') + ', seccomp allow-list'), log
             if egress:
                 # Startup names the egress proxy, and the rules whose address policy it now carries.
                 assert wait_for_log(rf'Gateway egress proxy localhost:{config["egress_proxy"].rpartition(":")[2]} carries the '
@@ -696,6 +705,12 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 assert ignored.take() == [], 'The Gateway took the egress proxy from its environment'
                 with logged:
                     assert not any(line.startswith('Gateway egress proxy') for line in log), log
+            # One grant worker serves two of its user's connections at once: the
+            # site answers neither until both have reached it.
+            site.together = threading.Barrier(2, timeout=4)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                both = list(pool.map(lambda _: request(users[0], path='/together'), range(2)))
+            assert all(res.returncode == 0 for res in both), [res.stderr for res in both]
             if sandbox == 'filter':
                 launched_directly()
             expected_events = {'mtls_accepted','ingress_closed','egress_closed'}
@@ -768,11 +783,13 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
 def main():
     binary=str(Path(sys.argv[1]).resolve())
     options = sys.argv[2:]
-    assert len(options) % 2 == 0 and set(options[::2]) <= {'--worker-sandbox', '--startup-fails'}, __doc__
+    assert len(options) % 2 == 0 and set(options[::2]) <= {'--worker-sandbox', '--startup-fails', '--landlock'}, __doc__
     options = dict(zip(options[::2], options[1::2]))
     sandbox = options.get('--worker-sandbox')
     assert sandbox in (None, 'namespaces', 'filter'), __doc__
     startup_fails = options.get('--startup-fails')
+    landlock = options.get('--landlock')
+    assert landlock in (None, 'unavailable'), __doc__
     with tempfile.TemporaryDirectory(prefix='countersign-gateway-test-') as td:
         os.umask(0o077)
         dir=Path(td)
@@ -803,7 +820,7 @@ def main():
                             'lf.test': KeptOpen(b'HTTP/1.1 403 Forbidden\n\n')}) as egress):
             for shared in (False,True):
                 do_test(dir,binary,ip,site,broker,identities,ca,shared,sandbox=sandbox,startup_fails=startup_fails,
-                        ignored=egress)
+                        landlock=landlock,ignored=egress)
                 print(('shared' if shared else 'sidecar')+(' Gateway refused to start' if startup_fails
                                                            else ' Gateway mTLS passed'))
             if startup_fails:
