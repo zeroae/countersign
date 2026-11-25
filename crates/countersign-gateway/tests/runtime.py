@@ -324,8 +324,8 @@ class EgressProxy(Counting, socketserver.ThreadingTCPServer):
     port is tunneled there, whatever port the CONNECT names."""
     daemon_threads = True
 
-    def __init__(self, names):
-        super().__init__(('127.0.0.1', 0), Tunnel)
+    def __init__(self, names, address=('127.0.0.1', 0)):
+        super().__init__(address, Tunnel)
         self.names = names
         self.requests = []
         self.recorded = threading.Lock()
@@ -344,8 +344,8 @@ class EgressProxy(Counting, socketserver.ThreadingTCPServer):
 
 
 @contextlib.contextmanager
-def egress_proxy(names):
-    proxy = EgressProxy(names)
+def egress_proxy(names, address=('127.0.0.1', 0)):
+    proxy = EgressProxy(names, address)
     thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     thread.start()
     try:
@@ -440,7 +440,7 @@ def egress_configuration(dir, binary, config):
     assert 'remove' in error and '"egress": "direct"' in error, error
     # Every private rule decides its route, not only the first: one after a proxied rule stops
     # startup too, and the error names it.
-    second = {**base, 'id': 'second', 'pattern': 'second.' + base['pattern']}
+    second = {**base, 'id': 'second', 'pattern': 'extra.' + base['pattern']}
     path.write_text(json.dumps({**config, 'egress_proxy': 'http://proxy.test:3128', 'destinations': [rule, second]}))
     error = refuses()
     assert re.search(r'\bsecond\b', error) and 'private_networks' in error, error
@@ -543,10 +543,10 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
         configuration_loading(dir, binary, config)
         egress_configuration(dir, binary, config)
     hosts = dir/'hosts'
-    def write_hosts(proxy='127.0.0.1'):
+    def write_hosts(proxy_address='127.0.0.1'):
         previous = hosts.stat().st_mtime if hosts.exists() else 0
         # Behind the egress proxy only the proxy can resolve the site's name.
-        hosts.write_text('127.0.0.1 localhost\n' + (ip+' direct.test\n'+proxy+' proxy.test\n' if egress else '')
+        hosts.write_text('127.0.0.1 localhost\n' + (ip+' direct.test\n'+proxy_address+' proxy.test\n' if egress else '')
                          + ('' if egress and not unusable else ip+' site.test\n'))
         # nss_wrapper rereads the file only when its modification time changes, to the second.
         stamp = max(previous + 2, time.time())
@@ -658,6 +658,11 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 # Nothing of the egress proxy's own answer reaches the Workload.
                 assert body == b'' and b'egress proxy' not in answer, (to, answer)
                 assert wait_for_log(rf'Gateway CONNECT {re.escape(request_id)} {error}'), (to, log)
+            def reads_site(user, to):
+                """The Workload reads the site at `to`, which saw the user's approved certificate."""
+                res = request(user, to=to)
+                assert res.returncode == 0, (user, to, res.stderr)
+                assert res.stdout == identities[user][1].fingerprint(hashes.SHA256()).hex().encode(), (user, to, res.stdout)
             def refused_before_egress(to):
                 """Countersign refuses `to` itself: neither the egress proxy nor the site sees a connection."""
                 seen_site, seen_proxy = site.connections, egress.connections
@@ -728,29 +733,28 @@ def do_test(dir, binary, ip,site, broker, identities, ca, shared, filter_kill=Fa
                 assert egress.take() == through_egress, through_egress
                 # The same Gateway reaches the rule with `"egress": "direct"` on its own.
                 for user in users:
-                    res = request(user, to=direct)
-                    assert res.returncode == 0, (user, res.stderr)
-                    assert res.stdout == identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
+                    reads_site(user, direct)
                 assert egress.take() == [], 'A direct destination went through the egress proxy'
                 # A wildcard rule reaches a host under it that the egress proxy allows.
                 for user in users:
-                    res = request(user, to=wild)
-                    assert res.returncode == 0, (user, res.stderr)
-                    assert res.stdout == identities[user][1].fingerprint(hashes.SHA256()).hex().encode()
+                    reads_site(user, wild)
                 assert egress.take() == [f'CONNECT {wild} HTTP/1.1'] * len(users)
                 # The egress proxy allows these names, but Countersign does not: one has no rule at
                 # the Gateway, the other no grant at the grant authority.
                 refused_before_egress(unlisted)
                 refused_before_egress(ungranted)
                 assert egress.take() == []
-                # The egress proxy's name is resolved on every connection. Moved to an address where
-                # nothing listens, the next CONNECT fails there; moved back, it succeeds.
-                write_hosts(proxy='127.0.0.2')
-                fails_through_egress(host, 'proxy_unavailable')
+                # The egress proxy's name is resolved on every connection, so it may move, as a load
+                # balancer's addresses do. Moved to a second egress proxy on another address, the
+                # next CONNECT goes there; moved back, the one after that comes back.
+                with egress_proxy(egress.names, ('127.0.0.2', egress.server_address[1])) as moved:
+                    write_hosts(proxy_address='127.0.0.2')
+                    reads_site(users[0], host)
+                    assert moved.take() == [f'CONNECT {host} HTTP/1.1'], 'The Gateway did not follow the egress proxy'
+                    assert egress.take() == []
                 write_hosts()
-                res = request(users[0])
-                assert res.returncode == 0, ('The Gateway did not follow the egress proxy back', res.stderr)
-                assert egress.take() == [f'CONNECT {host} HTTP/1.1']
+                reads_site(users[0], host)
+                assert egress.take() == [f'CONNECT {host} HTTP/1.1'], 'The Gateway did not follow the egress proxy back'
                 # The egress proxy refuses a name it does not allow.
                 fails_through_egress(failing['refused'], 'proxy_denied')
                 assert egress.take() == [f'CONNECT {failing["refused"]} HTTP/1.1'], 'The refusal was not the proxy\'s'
@@ -903,7 +907,8 @@ def main():
                             'banner.test': KeptOpen(b'SSH-2.0-test egress proxy\r\n'), 'stub.test': KeptOpen(b'SSH-2.0'),
                             'lf.test': KeptOpen(b'HTTP/1.1 403 Forbidden\n\n')}) as egress):
             if silent:
-                do_test(dir,binary,ip,site,broker,identities,ca,False,sandbox=sandbox,egress=egress,silent=True)
+                do_test(dir,binary,ip,site,broker,identities,ca,False,sandbox=sandbox,landlock=landlock,egress=egress,
+                        silent=True)
                 print('sidecar Gateway with a silent egress proxy failed closed')
                 return
             for shared in (False,True):
