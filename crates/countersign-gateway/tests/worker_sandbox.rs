@@ -33,6 +33,7 @@ mod linux {
             },
         },
         process::{Child, Command, Stdio},
+        sync::{Arc, Barrier},
         time::{Duration, Instant},
     };
 
@@ -48,6 +49,9 @@ mod linux {
     /// allow-list, which gives the same answer (ADR 0002). So this setup
     /// differs from a confined one only before confinement.
     const NO_CLONE3: &str = "no-clone3";
+    /// Before it confines itself, the stand-in frees a block large enough to
+    /// be mapped on its own, which raises the C library's trim threshold (#62).
+    const LARGE_BLOCK_FREED: &str = "large-block-freed";
 
     /// Stands in for a secret in the supervisor's or a grant worker's memory.
     static SECRET: [u8; 16] = *b"keep-this-secret";
@@ -93,6 +97,9 @@ mod linux {
             LANDLOCK_REFUSED => fail_with(libc::SYS_landlock_restrict_self, libc::EPERM),
             LANDLOCK_DENIED => fail_with(libc::SYS_landlock_create_ruleset, libc::EPERM),
             NO_CLONE3 => fail_with(libc::SYS_clone3, libc::ENOSYS),
+            // Not a host's quirk but code that ran first: 2 MiB, freed, moves
+            // glibc's trim threshold to 4 MiB, above confinement's warm-up.
+            LARGE_BLOCK_FREED => drop(std::hint::black_box(vec![1u8; 2 << 20])),
             _ => assert_eq!(setup, CONFINED),
         }
     }
@@ -206,6 +213,8 @@ mod linux {
                 "clone3" => clone3(),
                 "signal-on-io" => signal_on_io(number(1) as libc::pid_t),
                 "panic" => panic_on_a_thread(),
+                "free-heap" => free_a_heap(),
+                "threads" => threads_at_once(number(1)),
                 #[cfg(target_arch = "x86_64")]
                 "x32" => x32(),
                 #[cfg(target_arch = "x86_64")]
@@ -358,6 +367,41 @@ mod linux {
     fn panic_on_a_thread() -> Result<(), i32> {
         let thread = std::thread::spawn(|| panic!("the panic this test asks for"));
         assert!(thread.join().is_err(), "the thread did not panic");
+        Ok(())
+    }
+
+    /// A thread that allocates far more than the C library's trim threshold
+    /// (128 KiB) and frees it, as a connection thread does after a large
+    /// response: its heap then shrinks, for the first time since confinement.
+    fn free_a_heap() -> Result<(), i32> {
+        std::thread::spawn(|| {
+            // 8 MiB in blocks of 4 KiB: neither the size nor the shape of
+            // confinement's own warm-up.
+            let blocks: Vec<Vec<u8>> = (0..2048).map(|_| vec![1; 4 * 1024]).collect();
+            drop(std::hint::black_box(blocks));
+        })
+        .join()
+        .expect("the thread failed");
+        Ok(())
+    }
+
+    /// Threads that each allocate while all of them are alive, as connections
+    /// served at once do. Past eight, the C library needs another malloc arena.
+    fn threads_at_once(count: usize) -> Result<(), i32> {
+        let together = Arc::new(Barrier::new(count));
+        let threads: Vec<_> = (0..count)
+            .map(|_| {
+                let together = together.clone();
+                std::thread::spawn(move || {
+                    together.wait();
+                    std::hint::black_box(vec![1u8; 1024]);
+                    together.wait();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("a thread failed");
+        }
         Ok(())
     }
 
@@ -778,6 +822,46 @@ mod linux {
                 );
             }
         }),
+        (
+            "a_thread_that_frees_a_large_heap_leaves_the_grant_worker_serving",
+            || {
+                // A stand-in's first heap shrink comes after confinement (#62).
+                for setup in [UNCONFINED, CONFINED] {
+                    each_of_two(
+                        setup,
+                        |_| "free-heap".into(),
+                        |o| *o == Outcome::GotThrough,
+                        "a reply",
+                    );
+                }
+            },
+        ),
+        (
+            "a_large_block_freed_before_confinement_leaves_the_warm_up_working",
+            || {
+                // A heap freed after confinement still shrinks without a read.
+                each_of_two(
+                    LARGE_BLOCK_FREED,
+                    |_| "free-heap".into(),
+                    |o| *o == Outcome::GotThrough,
+                    "a reply",
+                );
+            },
+        ),
+        (
+            "sixteen_threads_at_once_leave_the_grant_worker_serving",
+            || {
+                // So do a stand-in's ninth and later malloc arenas (#62).
+                for setup in [UNCONFINED, CONFINED] {
+                    each_of_two(
+                        setup,
+                        |_| "threads 16".into(),
+                        |o| *o == Outcome::GotThrough,
+                        "a reply",
+                    );
+                }
+            },
+        ),
         ("returning_from_a_signal_handler_works", || {
             for worker in 0..2 {
                 let mut pair = [StandIn::start(CONFINED), StandIn::start(CONFINED)];
